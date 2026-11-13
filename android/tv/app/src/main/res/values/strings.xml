@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">TeleLink TV</string>
+    <string name="accessibility_service_description">Allows your paired phone to control supported TV navigation and enter text in the currently focused field. Commands are sent only over the encrypted TeleLink connection.</string>
+</resources>
