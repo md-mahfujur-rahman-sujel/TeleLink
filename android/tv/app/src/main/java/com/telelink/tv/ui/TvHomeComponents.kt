@@ -239,13 +239,17 @@ fun PairedPhonesCard(
  * panels instead of being a small bitmap stretched up. Includes a 4-module quiet zone for scanning.
  */
 @Composable
-fun QrCode(matrix: ByteMatrix, modifier: Modifier = Modifier) {
+fun QrCode(
+    matrix: ByteMatrix,
+    modifier: Modifier = Modifier,
+    description: String = "Scan with TeleLink Remote to pair securely"
+) {
     val quiet = 4
     Canvas(
         modifier = modifier
             .clip(RoundedCornerShape(14.dp))
             .background(Color.White)
-            .semantics { contentDescription = "Scan with TeleLink Remote to pair securely" }
+            .semantics { contentDescription = description }
     ) {
         val modules = matrix.width + quiet * 2
         val cell = size.minDimension / modules

@@ -16,6 +16,7 @@ import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -35,7 +36,9 @@ import com.telelink.tv.ui.PairedPhonesCard
 import com.telelink.tv.ui.PairingCard
 import com.telelink.tv.ui.ReceiverStatusCard
 import com.telelink.tv.ui.TvBackdrop
+import com.telelink.tv.ui.DeveloperInfo
 import com.telelink.tv.ui.TvBrandHeader
+import com.telelink.tv.ui.TvContactScreen
 import com.telelink.tv.ui.TvButton
 import com.telelink.tv.ui.TvButtonStyle
 import com.telelink.tv.ui.TvDesignSpace
@@ -335,7 +338,20 @@ fun TeleLinkHomeScreen() {
 
     val receiverActive = receiverRunning || receiverStarting
 
+    // "Contact developer" swaps the home screen for a page with the developer's details and QR codes.
+    var showContact by remember { mutableStateOf(false) }
+    val contactQrs = remember {
+        DeveloperInfo.links.map { link -> link to createQrMatrix(link.url) }
+    }
+    BackHandler(enabled = showContact) { showContact = false }
+    LaunchedEffect(showContact) {
+        if (!showContact) runCatching { primaryFocus.requestFocus() }
+    }
+
     TvBackdrop {
+        if (showContact) {
+            TvContactScreen(qrCodes = contactQrs, onClose = { showContact = false })
+        } else
         // 48 dp / 28 dp margins keep everything inside the TV's overscan-safe area.
         Row(
             modifier = Modifier
@@ -413,6 +429,12 @@ fun TeleLinkHomeScreen() {
                 PairedPhonesCard(
                     devices = pairedDevices,
                     onRevoke = { device -> receiverService?.revokeDevice(device.id) }
+                )
+
+                TvButton(
+                    text = "Contact developer",
+                    onClick = { showContact = true },
+                    modifier = Modifier.fillMaxWidth()
                 )
 
                 Text(
