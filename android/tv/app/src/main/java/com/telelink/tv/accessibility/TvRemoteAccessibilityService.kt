@@ -3,6 +3,7 @@ package com.telelink.tv.accessibility
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
+import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.view.accessibility.AccessibilityNodeInfo
@@ -42,6 +43,19 @@ class TvRemoteAccessibilityService : AccessibilityService() {
             "RECENTS" -> return performGlobalAction(GLOBAL_ACTION_RECENTS)
         }
 
+        // Android 13+: a real D-pad key event is far faster and more compatible than walking the
+        // accessibility node tree on every press. Fall back to the tree search if it is refused.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val globalDpad = when (key.uppercase()) {
+                "UP", "DPAD_UP" -> GLOBAL_ACTION_DPAD_UP
+                "DOWN", "DPAD_DOWN" -> GLOBAL_ACTION_DPAD_DOWN
+                "LEFT", "DPAD_LEFT" -> GLOBAL_ACTION_DPAD_LEFT
+                "RIGHT", "DPAD_RIGHT" -> GLOBAL_ACTION_DPAD_RIGHT
+                else -> null
+            }
+            if (globalDpad != null && performGlobalAction(globalDpad)) return true
+        }
+
         val direction = when (key.uppercase()) {
             "UP", "DPAD_UP" -> View.FOCUS_UP
             "DOWN", "DPAD_DOWN" -> View.FOCUS_DOWN
@@ -59,6 +73,11 @@ class TvRemoteAccessibilityService : AccessibilityService() {
     }
 
     fun clickFocused(): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            performGlobalAction(GLOBAL_ACTION_DPAD_CENTER)
+        ) {
+            return true
+        }
         val root = rootInActiveWindow ?: return false
         val focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
             ?: root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)

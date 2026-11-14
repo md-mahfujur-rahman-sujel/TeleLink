@@ -36,6 +36,34 @@ When TeleLink TV is in the background, Android may require a user action before 
 
 From the TV screen, open Accessibility settings and enable **TeleLink TV remote access**. Android displays its system disclosure. Accessibility support is required for some cross-app actions. It does not grant control over apps that block these actions.
 
+Some TV firmware hides the Accessibility screen, and **Enable phone controls** then cannot open it. Enable the service with adb from a computer on the same network instead (replace `TV_IP` with the TV's address):
+
+```powershell
+adb connect TV_IP:5555
+adb shell settings put secure enabled_accessibility_services com.telelink.tv/com.telelink.tv.accessibility.TvRemoteAccessibilityService
+adb shell settings put secure accessibility_enabled 1
+```
+
+The TV must have Developer options and network debugging turned on for `adb connect` to work.
+
+Easier option: grant TeleLink TV one extra permission once, and it will switch the service on by itself (also each time the app opens):
+
+```powershell
+adb shell pm grant com.telelink.tv android.permission.WRITE_SECURE_SETTINGS
+```
+
+Without Accessibility, the phone can still navigate TeleLink TV itself (D-pad, OK, Back, Home) and its built-in browser, and launch other apps. Controlling other apps needs the Accessibility service.
+
+## Bluetooth remote (works on any TV with Bluetooth)
+
+In TeleLink Remote choose **Bluetooth remote** at the top. The phone then acts as a Bluetooth keyboard, mouse and media remote, so the TV treats it like its own remote. Home, Back, the D-pad, volume, a touchpad pointer and typing work in every app and on the TV's launcher. Nothing needs to be installed on the TV, and no Accessibility or adb is needed.
+
+1. Tap **Start Bluetooth remote** and allow the Nearby devices permission.
+2. Tap **Make phone visible**. On the TV open Bluetooth settings, add a new device and choose the phone. Confirm the code on both screens.
+3. Back in TeleLink Remote, tap **Refresh list**, then **Connect** next to the TV.
+
+Limits: Android 9 or newer, and some phone brands disable acting as a Bluetooth remote. Only one app at a time can act as a Bluetooth keyboard.
+
 ## Manage paired phones
 
 TeleLink TV displays saved paired devices. Use a device's remove/revoke action on the TV to invalidate its saved credential and disconnect it. On the phone, choose **Forget saved pairing and pair again** to discard the revoked token, then scan the current TV QR code and enter a fresh pairing session.
@@ -52,7 +80,7 @@ Select **Stop Receiver** in TeleLink TV, or use **Stop** in the receiver notific
 - Router guest-network isolation can block discovery or control.
 - External browser controls are not guaranteed. Integrated playback depends on the site, DRM policy, codec, and TV firmware.
 - App launching only covers apps the TV exposes to Android's launcher APIs.
-- SIKO Android 16 acceptance remains pending until both apps are installed and exercised on that physical TV.
+- Physical-device acceptance remains pending until both apps are installed and exercised on an Android TV and phone.
 
 ## APK files
 

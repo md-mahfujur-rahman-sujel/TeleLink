@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.TeleLinkTV" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- Dark brand window so there is no white flash before Compose draws the first frame. -->
+    <style name="Theme.TeleLinkTV" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/telelink_navy</item>
+        <item name="android:statusBarColor">@color/telelink_navy</item>
+        <item name="android:navigationBarColor">@color/telelink_navy</item>
+    </style>
 </resources>

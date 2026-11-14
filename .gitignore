@@ -1,10 +1,11 @@
 /builds/**
 **/build/
 **/.gradle/
+**/.kotlin/
 **/local.properties
 **/keystore.properties
 **/*.jks
 **/*.keystore
 android/tv/signing/
 *.iml
-.idea/**
+**/.idea/

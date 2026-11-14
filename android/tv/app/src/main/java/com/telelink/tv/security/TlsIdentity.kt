@@ -48,9 +48,23 @@ class TlsIdentity {
                 .setCertificateNotBefore(start.time)
                 .setCertificateNotAfter(end.time)
                 .setKeySize(2048)
-                .setDigests(KeyProperties.DIGEST_NONE)
-                .setSignaturePaddings(KeyProperties.SIGNATURE_PADDING_RSA_PKCS1)
-                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_RSA_PKCS1)
+                // Modern TLS (1.3) signs with RSA-PSS. Conscrypt performs that through the keystore
+                // using raw (no-padding) RSA, so the key must allow PSS and ENCRYPTION_PADDING_NONE
+                // as well as the older PKCS1 modes, otherwise the handshake with the phone can fail.
+                .setDigests(
+                    KeyProperties.DIGEST_NONE,
+                    KeyProperties.DIGEST_SHA256,
+                    KeyProperties.DIGEST_SHA384,
+                    KeyProperties.DIGEST_SHA512
+                )
+                .setSignaturePaddings(
+                    KeyProperties.SIGNATURE_PADDING_RSA_PKCS1,
+                    KeyProperties.SIGNATURE_PADDING_RSA_PSS
+                )
+                .setEncryptionPaddings(
+                    KeyProperties.ENCRYPTION_PADDING_NONE,
+                    KeyProperties.ENCRYPTION_PADDING_RSA_PKCS1
+                )
                 .build()
 
             KeyPairGenerator.getInstance("RSA", ANDROID_KEY_STORE).apply {
@@ -63,7 +77,9 @@ class TlsIdentity {
 
     private companion object {
         const val ANDROID_KEY_STORE = "AndroidKeyStore"
-        const val KEY_ALIAS = "telelink_tv_tls_identity"
+        // v2: a new alias so the key is regenerated with the broader capabilities above.
+        // The TV certificate fingerprint changes once; phones simply pair again.
+        const val KEY_ALIAS = "telelink_tv_tls_identity_v2"
         const val CERTIFICATE_VALIDITY_YEARS = 10
     }
 }

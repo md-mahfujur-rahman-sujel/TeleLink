@@ -3,7 +3,7 @@
 ## Stage 0 — Product baseline
 
 - [x] Confirm the two-app local-network product direction.
-- [x] Record the SIKO TV details supplied by the user and keep device-specific validation open.
+- [x] Confirm target-device compatibility requirements and keep device-specific validation open.
 - [x] Implement a connected-device foreground receiver service, six-digit PIN expiry/rotation, attempt limiting, and status UI.
 
 ## Stage 1 — Secure TV foundation
@@ -39,9 +39,9 @@
 - [x] Add requirements, architecture, protocol, user, and release documentation.
 - [x] Run host-side unit tests, full release lint, debug/release assembly, and APK signature verification.
 - [ ] Run LAN, reconnect, revoke, permission, and security checks on devices.
-- [ ] Install and validate both apps on the user's SIKO Android 16 TV and phone.
+- [ ] Install and validate both apps on a physical Android TV and phone.
 - [ ] Record hardware results and prepare any public-distribution follow-up.
 
 ## Completion rule
 
-A successful Gradle build is not product acceptance. The software implementation and signed APK packaging are in place, but TeleLink 1.0 remains incomplete until end-to-end device validation is recorded, including SIKO-specific acceptance.
+A successful Gradle build is not product acceptance. The software implementation and signed APK packaging are in place, but TeleLink 1.0 remains incomplete until end-to-end device validation is recorded, including target-device acceptance.

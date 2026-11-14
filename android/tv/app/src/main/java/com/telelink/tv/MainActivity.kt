@@ -8,7 +8,6 @@ import android.content.ContextWrapper
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
 import android.net.ConnectivityManager
 import android.net.Uri
 import android.os.Build
@@ -21,26 +20,31 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.telelink.tv.network.TvCommandRouter
 import com.telelink.tv.security.PairedDevice
+import com.telelink.tv.ui.DetailsCard
+import com.telelink.tv.ui.PairedPhonesCard
+import com.telelink.tv.ui.PairingCard
+import com.telelink.tv.ui.ReceiverStatusCard
+import com.telelink.tv.ui.TvBackdrop
+import com.telelink.tv.ui.TvBrandHeader
+import com.telelink.tv.ui.TvButton
+import com.telelink.tv.ui.TvButtonStyle
+import com.telelink.tv.ui.TvDesignSpace
 import com.telelink.tv.ui.theme.TeleLinkTVTheme
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.qrcode.QRCodeWriter
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
+import com.google.zxing.qrcode.encoder.ByteMatrix
+import com.google.zxing.qrcode.encoder.Encoder
 import androidx.core.content.ContextCompat
-import androidx.core.graphics.createBitmap
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 
@@ -51,7 +55,9 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             TeleLinkTVTheme {
-                TeleLinkHomeScreen()
+                TvDesignSpace {
+                    TeleLinkHomeScreen()
+                }
             }
         }
     }
@@ -273,7 +279,7 @@ fun TeleLinkHomeScreen() {
             }
         }
 
-    val pairingQrBitmap = remember(pairingPin, ipAddress, certificateFingerprint) {
+    val pairingQrMatrix = remember(pairingPin, ipAddress, certificateFingerprint) {
         val pin = pairingPin
         val fingerprint = certificateFingerprint
         if (pin == null || fingerprint == null) {
@@ -291,243 +297,131 @@ fun TeleLinkHomeScreen() {
                 .appendQueryParameter("pin", pin)
                 .build()
                 .toString()
-            createQrBitmap(payload)
+            createQrMatrix(payload)
         }
     }
 
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background
-    ) {
+    fun toggleReceiver() {
+        if (receiverRunning || receiverStarting) {
+            context.startService(
+                Intent(context, ReceiverForegroundService::class.java)
+                    .setAction(ReceiverForegroundService.ACTION_STOP)
+            )
+        } else if (Build.VERSION.SDK_INT >= 37) {
+            val permissionGranted =
+                context.checkSelfPermission(
+                    Manifest.permission.ACCESS_LOCAL_NETWORK
+                ) == PackageManager.PERMISSION_GRANTED
 
-        Column(
+            if (permissionGranted) {
+                startAfterNotificationPermission()
+            } else {
+                localNetworkPermissionLauncher.launch(
+                    Manifest.permission.ACCESS_LOCAL_NETWORK
+                )
+            }
+        } else {
+            startAfterNotificationPermission()
+        }
+    }
+
+    // The main action gets D-pad focus on launch so the remote's OK button works immediately.
+    val primaryFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        runCatching { primaryFocus.requestFocus() }
+        // Silently turn phone controls on when the one-time adb grant has been done.
+        commandRouter.autoEnableAccessibility()
+    }
+
+    val receiverActive = receiverRunning || receiverStarting
+
+    TvBackdrop {
+        // 48 dp / 28 dp margins keep everything inside the TV's overscan-safe area.
+        Row(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(32.dp),
-
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+                .padding(horizontal = 48.dp, vertical = 28.dp),
+            horizontalArrangement = Arrangement.spacedBy(32.dp)
         ) {
-
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Image(
-                    painter = painterResource(R.drawable.telelink_logo),
-                    contentDescription = "TeleLink logo",
-                    modifier = Modifier.width(380.dp).height(100.dp)
-                )
-                Text("TV Companion", fontSize = 18.sp)
-            }
-
-            Spacer(modifier = Modifier.height(32.dp))
-
-            Card(
-                modifier = Modifier.fillMaxWidth()
-            ) {
-
-                Column(
-                    modifier = Modifier.padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-
-                    Text(
-                        text = "DEVICE INFORMATION",
-                        fontWeight = FontWeight.Bold
-                    )
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Text(text = "Device: ${Build.MANUFACTURER} ${Build.MODEL}")
-
-                    Text(text = "Local IP: $ipAddress")
-
-                    Text(text = "Connection: Wi-Fi")
-
-                    Text(text = "Receiver Port: 8765")
-
-                    Text(
-                        text = if (connectedPhoneCount == 1) {
-                            "Connected phones: 1"
-                        } else {
-                            "Connected phones: $connectedPhoneCount"
-                        }
-                    )
-
-                    if (pairedDevices.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text("PAIRED PHONES", fontWeight = FontWeight.Bold)
-                        pairedDevices.forEach { device ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(device.name, modifier = Modifier.weight(1f))
-                                TextButton(
-                                    onClick = {
-                                        receiverService?.revokeDevice(device.id)
-                                    }
-                                ) {
-                                    Text("Revoke")
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Text(
-                        text = "Receiver Status: $receiverStatus",
-                        color = if (receiverRunning || receiverStarting) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.error
-                        },
-                        fontWeight = FontWeight.Bold
-                    )
-
-                    if (receiverRunning && !notificationAccessGranted) {
-                        Text(
-                            text = "Notifications are off. Use Stop Receiver here when finished.",
-                            fontSize = 12.sp
-                        )
-                    }
-
-                    if (pairingPin != null &&
-                        (receiverRunning || receiverStarting)
-                    ) {
-
-                        Spacer(modifier = Modifier.height(20.dp))
-
-                        Text(
-                            text = "PAIRING PIN",
-                            fontWeight = FontWeight.Bold
-                        )
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Text(
-                            text = pairingPin!!,
-                            fontSize = 36.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 8.sp
-                        )
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Text(
-                            text = "Expires in %d:%02d. A new PIN is issued " +
-                                    "after pairing or when this one expires."
-                                .format(
-                                    pinSecondsRemaining / 60,
-                                    pinSecondsRemaining % 60
-                                ),
-                            fontSize = 12.sp
-                        )
-
-                        if (pairingQrBitmap != null) {
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Image(
-                                bitmap = pairingQrBitmap.asImageBitmap(),
-                                contentDescription = "Scan with TeleLink Remote to pair securely",
-                                modifier = Modifier.size(220.dp)
-                            )
-                            Text(
-                                text = "Scan this code from TeleLink Remote. " +
-                                        "It verifies this TV and starts secure pairing.",
-                                fontSize = 12.sp
-                            )
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Button(
-                onClick = {
-
-                    if (Build.VERSION.SDK_INT >= 37) {
-
-                        val permissionGranted =
-                            context.checkSelfPermission(
-                                Manifest.permission.ACCESS_LOCAL_NETWORK
-                            ) == PackageManager.PERMISSION_GRANTED
-
-                        if (permissionGranted) {
-                            startAfterNotificationPermission()
-                        } else {
-                            localNetworkPermissionLauncher.launch(
-                                Manifest.permission.ACCESS_LOCAL_NETWORK
-                            )
-                        }
-
-                    } else {
-                        startAfterNotificationPermission()
-                    }
-                },
-                enabled = !receiverRunning && !receiverStarting,
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
+                    .weight(1f)
+                    .fillMaxHeight(),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                TvBrandHeader()
+                ReceiverStatusCard(
+                    status = receiverStatus,
+                    running = receiverRunning,
+                    starting = receiverStarting,
+                    showNotificationHint = receiverRunning && !notificationAccessGranted
+                )
+                PairingCard(
+                    receiverActive = receiverActive,
+                    pin = pairingPin,
+                    secondsRemaining = pinSecondsRemaining,
+                    qr = pairingQrMatrix,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Column(
+                modifier = Modifier
+                    .weight(0.9f)
+                    .fillMaxHeight()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 4.dp, vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                TvButton(
+                    text = when {
+                        receiverStarting -> "Starting…"
+                        receiverRunning -> "Stop Receiver"
+                        else -> "Start Receiver"
+                    },
+                    onClick = { toggleReceiver() },
+                    style = if (receiverActive) TvButtonStyle.Secondary else TvButtonStyle.Primary,
+                    focusRequester = primaryFocus,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                TvButton(
+                    text = "Enable phone controls",
+                    onClick = {
+                        commandRouter.openAccessibilitySettings()?.let { hint ->
+                            Toast.makeText(context, hint, Toast.LENGTH_LONG).show()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                TvButton(
+                    text = "Refresh IP address",
+                    onClick = {
+                        receiverService?.refreshIpAddress()
+                        if (receiverService == null) ipAddress = getLocalIpAddress(context)
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(Modifier.height(4.dp))
+
+                DetailsCard(
+                    device = "${Build.MANUFACTURER} ${Build.MODEL}",
+                    address = "$ipAddress:8765",
+                    connectedPhones = connectedPhoneCount
+                )
+
+                PairedPhonesCard(
+                    devices = pairedDevices,
+                    onRevoke = { device -> receiverService?.revokeDevice(device.id) }
+                )
+
                 Text(
-                    if (receiverStarting) {
-                        "Starting..."
-                    } else {
-                        "Start Receiver"
-                    }
+                    text = "TeleLink TV 1.0",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp)
                 )
             }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            OutlinedButton(
-                onClick = { commandRouter.openAccessibilitySettings() },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
-            ) {
-                Text("Enable phone controls")
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            OutlinedButton(
-                onClick = {
-                    context.startService(
-                        Intent(context, ReceiverForegroundService::class.java)
-                            .setAction(ReceiverForegroundService.ACTION_STOP)
-                    )
-                },
-                enabled = receiverRunning || receiverStarting,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
-            ) {
-                Text("Stop Receiver")
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            OutlinedButton(
-                onClick = {
-                    receiverService?.refreshIpAddress()
-                    if (receiverService == null) ipAddress = getLocalIpAddress(context)
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
-            ) {
-                Text("Refresh IP Address")
-            }
-
-            Spacer(modifier = Modifier.height(32.dp))
-
-            Text(
-                text = "TeleLink TV 1.0",
-                fontSize = 12.sp
-            )
         }
     }
 }
@@ -563,18 +457,14 @@ fun getLocalIpAddress(context: Context): String {
     }
 }
 
-private fun createQrBitmap(value: String): Bitmap {
-    val matrix = QRCodeWriter().encode(value, BarcodeFormat.QR_CODE, 512, 512)
-    val pixels = IntArray(matrix.width * matrix.height)
-    for (y in 0 until matrix.height) {
-        for (x in 0 until matrix.width) {
-            pixels[y * matrix.width + x] =
-                if (matrix[x, y]) android.graphics.Color.BLACK
-                else android.graphics.Color.WHITE
-        }
-    }
-    return createBitmap(matrix.width, matrix.height)
-        .apply { setPixels(pixels, 0, matrix.width, 0, 0, matrix.width, matrix.height) }
+private fun createQrMatrix(value: String): ByteMatrix? = try {
+    val hints = mapOf(
+        EncodeHintType.CHARACTER_SET to "UTF-8",
+        EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M
+    )
+    Encoder.encode(value, ErrorCorrectionLevel.M, hints).matrix
+} catch (_: Exception) {
+    null
 }
 
 private fun findComponentActivity(context: Context): ComponentActivity? {

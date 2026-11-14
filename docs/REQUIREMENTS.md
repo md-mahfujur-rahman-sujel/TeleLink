@@ -1,6 +1,6 @@
 # TeleLink 1.0 requirements
 
-Status terms: **Done** means present in the current source; **In progress** means partial foundation exists; **Not started** means no implementation exists; **Device check** means it cannot be confirmed without the actual SIKO TV.
+Status terms: **Done** means present in the current source; **In progress** means partial foundation exists; **Not started** means no implementation exists; **Device check** means it cannot be confirmed without a physical Android TV.
 
 ## Product requirements
 
@@ -19,7 +19,7 @@ Status terms: **Done** means present in the current source; **In progress** mean
 | TL-011 | Launch installed TV apps where Android permits. | P1 | Implemented in source; runtime check pending |
 | TL-012 | Show clear connection, permission, pairing, and command errors. | P0 | Implemented in source; lifecycle/device runtime validation pending |
 | TL-013 | Build debug and release APKs for both apps and provide install/use documentation. | P0 | Debug builds pass; signed private release APKs and user documentation produced |
-| TL-014 | Validate the complete experience on the user's SIKO Android 16 TV. | P0 | Device check |
+| TL-014 | Validate the complete experience on a physical Android TV and phone. | P0 | Device check |
 
 ## Functional details
 
@@ -53,4 +53,4 @@ Status terms: **Done** means present in the current source; **In progress** mean
 - Reconnection and app lifecycle changes have explicit status feedback.
 - Network server operations run off the main thread; UI state updates run on the main thread.
 - Release artifacts are signed with a documented key workflow; signing secrets are not committed to the project.
-- User-facing documentation distinguishes verified behavior from SIKO-specific assumptions.
+- User-facing documentation distinguishes verified behavior from device-specific assumptions.

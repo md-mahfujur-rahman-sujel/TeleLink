@@ -1,3 +1,8 @@
 <resources>
-    <style name="Theme.TeleLinkRemote" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- Dark window avoids a white flash before the first Compose frame. -->
+    <style name="Theme.TeleLinkRemote" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/telelink_navy</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
 </resources>

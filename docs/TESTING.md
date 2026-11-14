@@ -25,7 +25,7 @@ cd android/tv
 .\gradlew.bat :app:testDebugUnitTest :mobile:testDebugUnitTest :app:lintRelease :mobile:lintRelease
 ```
 
-These host-side tests cover PIN generation/expiry/one-time rotation, monotonic per-IP failed-pair throttling and bounded-table eviction, TV disconnect reason reporting, exact QR certificate fingerprint trust and mismatch rejection, canonical command request IDs, the 16 KiB WebSocket frame limit, one-time authorization for notification launches, stale-discovery generation guards, IPv4 receiver endpoint selection, phone-side HTTP(S) URL validation, and QR scheme, host, port, fingerprint, PIN, and duplicate-parameter validation. A local TLS WebSocket integration test exercises pre-pair command rejection, pairing, successful saved-token reconnect, malformed request-ID rejection, authenticated command routing, immediate authorization invalidation and active-session closure on revocation, revoked-token rejection, malformed JSON, binary-frame rejection, oversized-frame closure, live failed-PIN throttling, and receiver stop-status propagation. Router/LAN behavior, Android Keystore integration, Accessibility controls, browser playback, and SIKO compatibility still require device testing.
+These host-side tests cover PIN generation/expiry/one-time rotation, monotonic per-IP failed-pair throttling and bounded-table eviction, TV disconnect reason reporting, exact QR certificate fingerprint trust and mismatch rejection, canonical command request IDs, the 16 KiB WebSocket frame limit, one-time authorization for notification launches, stale-discovery generation guards, IPv4 receiver endpoint selection, phone-side HTTP(S) URL validation, and QR scheme, host, port, fingerprint, PIN, and duplicate-parameter validation. A local TLS WebSocket integration test exercises pre-pair command rejection, pairing, successful saved-token reconnect, malformed request-ID rejection, authenticated command routing, immediate authorization invalidation and active-session closure on revocation, revoked-token rejection, malformed JSON, binary-frame rejection, oversized-frame closure, live failed-PIN throttling, and receiver stop-status propagation. Router/LAN behavior, Android Keystore integration, Accessibility controls, browser playback, and device compatibility still require device testing.
 
 ## Pairing and device tests
 
@@ -62,9 +62,9 @@ These host-side tests cover PIN generation/expiry/one-time rotation, monotonic p
 - Start supported TV-side video, control it from the phone, then lock/leave the phone app; playback should continue.
 - Confirm DRM, codec, website, and external-browser limitations produce honest status feedback.
 
-## SIKO acceptance
+## Target-device acceptance
 
-On the user's SIKO 43-inch Android 16 TV and Android phone, record:
+On a physical Android TV and Android phone, record:
 
 - TV firmware version and app installation/launch behavior.
 - Wi-Fi address, NSD discovery, QR pairing, reconnect, and revocation.

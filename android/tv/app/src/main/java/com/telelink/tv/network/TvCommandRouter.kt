@@ -1,7 +1,13 @@
 package com.telelink.tv.network
 
+import android.Manifest
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.SystemClock
+import android.view.KeyEvent
+import android.view.MotionEvent
 import androidx.core.net.toUri
 import android.provider.Settings
 import com.telelink.tv.accessibility.TvRemoteAccessibilityService
@@ -42,6 +48,25 @@ class TvCommandRouter(
             return
         }
 
+        if ((type == "TEXT_INPUT" || type == "SHARE_TEXT") &&
+            TvRemoteAccessibilityService.instance() == null
+        ) {
+            // No Accessibility: type into the TeleLink browser's focused text box instead.
+            val text = command.optString("text")
+            if (text.length > MAX_TEXT_LENGTH) {
+                onComplete(CommandResult(false, "Text is too long"))
+                return
+            }
+            val submitted = TvBrowserBridge.insertText(text) { accepted ->
+                onComplete(
+                    if (accepted) CommandResult(true, "Text entered in the TV browser")
+                    else CommandResult(false, "Select a text box in the TeleLink browser first")
+                )
+            }
+            if (!submitted) onComplete(CommandResult(false, accessibilityRequiredMessage()))
+            return
+        }
+
         onComplete(executeImmediate(command))
     }
 
@@ -69,7 +94,12 @@ class TvCommandRouter(
                 "KEY_PRESS" -> {
                     val key = command.optString("key").uppercase()
                     val service = TvRemoteAccessibilityService.instance()
-                        ?: return CommandResult(false, accessibilityRequiredMessage())
+                    if (service == null) {
+                        // Accessibility is off (some TV firmware hides it): still let the phone
+                        // navigate TeleLink TV itself, including its built-in browser.
+                        return if (pressInApp(key)) CommandResult(true, "$key sent to TeleLink TV")
+                        else CommandResult(false, accessibilityRequiredMessage())
+                    }
                     val handled = when (key) {
                         "SELECT", "ENTER", "OK" -> service.clickFocused()
                         else -> service.press(key)
@@ -80,7 +110,6 @@ class TvCommandRouter(
 
                 "TOUCH_GESTURE" -> {
                     val service = TvRemoteAccessibilityService.instance()
-                        ?: return CommandResult(false, accessibilityRequiredMessage())
                     val x = command.optDouble("x", Double.NaN).toFloat()
                     val y = command.optDouble("y", Double.NaN).toFloat()
                     val endX = command.optDouble("endX", x.toDouble()).toFloat()
@@ -88,8 +117,14 @@ class TvCommandRouter(
                     if (listOf(x, y, endX, endY).any { !it.isFinite() }) {
                         return CommandResult(false, "Invalid touch coordinates")
                     }
-                    val sent = service.performTouchGesture(x, y, endX, endY, command.optLong("durationMs", 120L))
+                    val duration = command.optLong("durationMs", 120L)
+                    val sent = if (service != null) {
+                        service.performTouchGesture(x, y, endX, endY, duration)
+                    } else {
+                        touchInApp(x, y, endX, endY, duration)
+                    }
                     if (sent) CommandResult(true, "Touch gesture sent")
+                    else if (service == null) CommandResult(false, accessibilityRequiredMessage())
                     else CommandResult(false, "The TV did not accept the touch gesture")
                 }
 
@@ -104,8 +139,180 @@ class TvCommandRouter(
         }
     }
 
-    fun openAccessibilitySettings() {
-        context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+    /**
+     * Opens the TV's Accessibility settings. Some TV firmware (including Amlogic builds) does not
+     * provide the standard screen, so this tries several fallbacks.
+     * Returns null when Accessibility settings opened; otherwise a message to show the user.
+     */
+    fun openAccessibilitySettings(): String? {
+        if (autoEnableAccessibility()) return "Phone controls turned on."
+
+        val accessibilityTargets = listOf(
+            Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS),
+            Intent().setComponent(
+                ComponentName(
+                    "com.android.tv.settings",
+                    "com.android.tv.settings.accessibility.AccessibilityActivity"
+                )
+            )
+        )
+        if (accessibilityTargets.any(::tryStartSettings)) return null
+
+        // Accessibility is hidden: open Developer options instead, so debugging can be switched on
+        // and TeleLink can be allowed from a computer with adb.
+        val developerTargets = listOf(
+            Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS),
+            Intent().setComponent(
+                ComponentName(
+                    "com.android.tv.settings",
+                    "com.android.tv.settings.system.development.DevelopmentActivity"
+                )
+            ),
+            Intent().setComponent(
+                ComponentName("com.android.settings", "com.android.settings.DevelopmentSettings")
+            )
+        )
+        if (developerTargets.any(::tryStartSettings)) {
+            return "Accessibility is hidden on this TV. Opened Developer options: turn on USB debugging or network debugging."
+        }
+
+        val generalTargets = listOfNotNull(
+            Intent(Settings.ACTION_SETTINGS),
+            context.packageManager.getLeanbackLaunchIntentForPackage("com.android.tv.settings"),
+            context.packageManager.getLaunchIntentForPackage("com.android.tv.settings")
+        )
+        return if (generalTargets.any(::tryStartSettings)) {
+            "Open Device Preferences > Accessibility, then turn on TeleLink TV remote access."
+        } else {
+            "This TV hides its Accessibility settings. On a computer run: adb shell pm grant com.telelink.tv android.permission.WRITE_SECURE_SETTINGS, then press this button again."
+        }
+    }
+
+    /**
+     * Turns the TeleLink accessibility service on directly, without the Settings screen. Works once
+     * the one-time adb grant of WRITE_SECURE_SETTINGS has been done (see the user guide).
+     */
+    fun autoEnableAccessibility(): Boolean {
+        if (TvRemoteAccessibilityService.instance() != null) return true
+        if (context.checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) return false
+        return try {
+            val service = ComponentName(context, TvRemoteAccessibilityService::class.java)
+                .flattenToString()
+            val resolver = context.contentResolver
+            val entries = Settings.Secure
+                .getString(resolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
+                .orEmpty()
+                .split(':')
+                .filter { it.isNotBlank() }
+            if (service !in entries) {
+                Settings.Secure.putString(
+                    resolver,
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+                    (entries + service).joinToString(":")
+                )
+            }
+            Settings.Secure.putInt(resolver, Settings.Secure.ACCESSIBILITY_ENABLED, 1)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /** Sends a tap or swipe to the TeleLink screen in front (page, browser or app UI). */
+    private fun touchInApp(
+        x: Float,
+        y: Float,
+        endX: Float,
+        endY: Float,
+        durationMs: Long
+    ): Boolean {
+        val activity = com.telelink.tv.TeleLinkApplication.resumedActivity() ?: return false
+        val decor = activity.window?.decorView ?: return false
+        activity.runOnUiThread {
+            val width = decor.width.toFloat()
+            val height = decor.height.toFloat()
+            if (width <= 0f || height <= 0f) return@runOnUiThread
+            val startX = x.coerceIn(0f, 1f) * width
+            val startY = y.coerceIn(0f, 1f) * height
+            val stopX = endX.coerceIn(0f, 1f) * width
+            val stopY = endY.coerceIn(0f, 1f) * height
+            val duration = durationMs.coerceIn(30L, 1000L)
+            val downTime = SystemClock.uptimeMillis()
+            fun send(action: Int, atX: Float, atY: Float, offsetMs: Long) {
+                val event = MotionEvent.obtain(downTime, downTime + offsetMs, action, atX, atY, 0)
+                decor.dispatchTouchEvent(event)
+                event.recycle()
+            }
+            send(MotionEvent.ACTION_DOWN, startX, startY, 0L)
+            val moved = kotlin.math.abs(stopX - startX) + kotlin.math.abs(stopY - startY) > 12f
+            if (moved) {
+                val steps = 6
+                for (step in 1..steps) {
+                    val fraction = step / steps.toFloat()
+                    send(
+                        MotionEvent.ACTION_MOVE,
+                        startX + (stopX - startX) * fraction,
+                        startY + (stopY - startY) * fraction,
+                        (duration * fraction).toLong()
+                    )
+                }
+            }
+            send(MotionEvent.ACTION_UP, if (moved) stopX else startX, if (moved) stopY else startY, duration)
+        }
+        return true
+    }
+
+    /** Navigates the TeleLink screen that is in front by sending it real key events. */
+    private fun pressInApp(key: String): Boolean {
+        val activity = com.telelink.tv.TeleLinkApplication.resumedActivity() ?: return false
+        return when (key) {
+            "HOME" -> try {
+                activity.startActivity(
+                    Intent(Intent.ACTION_MAIN)
+                        .addCategory(Intent.CATEGORY_HOME)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+                true
+            } catch (_: Exception) {
+                false
+            }
+
+            "BACK" -> {
+                activity.runOnUiThread {
+                    if (activity is androidx.activity.ComponentActivity) {
+                        activity.onBackPressedDispatcher.onBackPressed()
+                    } else {
+                        activity.finish()
+                    }
+                }
+                true
+            }
+
+            else -> {
+                val code = when (key) {
+                    "UP", "DPAD_UP" -> KeyEvent.KEYCODE_DPAD_UP
+                    "DOWN", "DPAD_DOWN" -> KeyEvent.KEYCODE_DPAD_DOWN
+                    "LEFT", "DPAD_LEFT" -> KeyEvent.KEYCODE_DPAD_LEFT
+                    "RIGHT", "DPAD_RIGHT" -> KeyEvent.KEYCODE_DPAD_RIGHT
+                    "SELECT", "ENTER", "OK" -> KeyEvent.KEYCODE_DPAD_CENTER
+                    else -> return false
+                }
+                activity.runOnUiThread {
+                    activity.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, code))
+                    activity.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_UP, code))
+                }
+                true
+            }
+        }
+    }
+
+    private fun tryStartSettings(intent: Intent): Boolean = try {
+        context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        true
+    } catch (_: Exception) {
+        false
     }
 
     private fun openUrl(command: JSONObject): CommandResult {

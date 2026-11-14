@@ -11,5 +11,12 @@ val TeleBlue = Color(0xFF6A9BFF)
 val TeleBlueDeep = Color(0xFF3F74F0)
 val TeleTeal = Color(0xFF2DD4BF)
 val TeleText = Color(0xFFF2F5FA)
-val TeleTextMuted = Color(0xFFA9B6CF)
+val TeleTextMuted = Color(0xFFBCC8DE)
 val TeleDanger = Color(0xFFFF7A7A)
+
+// Glassmorphism tokens: translucent fills and a light rim that read as frosted glass over the
+// gradient backdrop, while keeping the navy/blue brand dominant.
+val GlassFillTop = Color(0x17FFFFFF)
+val GlassFillBottom = Color(0x0AFFFFFF)
+val GlassBorder = Color(0x24FFFFFF)
+val GlassFocusRing = Color(0xFFFFFFFF)

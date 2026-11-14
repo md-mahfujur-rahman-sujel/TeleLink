@@ -1,6 +1,7 @@
 package com.telelink.tv.browser
 
 import android.webkit.WebView
+import org.json.JSONObject
 import java.lang.ref.WeakReference
 
 object TvBrowserBridge {
@@ -13,6 +14,30 @@ object TvBrowserBridge {
 
     fun detach(webView: WebView) {
         if (activeWebView.get() === webView) activeWebView.clear()
+    }
+
+    /** Types into the focused text box of the TeleLink browser (works without Accessibility). */
+    fun insertText(text: String, onResult: (Boolean) -> Unit): Boolean {
+        val webView = activeWebView.get() ?: return false
+        val literal = JSONObject.quote(text)
+        val script = "(()=>{const e=document.activeElement;if(!e)return false;const t=e.tagName;" +
+            "if(t==='INPUT'||t==='TEXTAREA'){const p=t==='INPUT'?HTMLInputElement.prototype:HTMLTextAreaElement.prototype;" +
+            "Object.getOwnPropertyDescriptor(p,'value').set.call(e,$literal);" +
+            "e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));return true}" +
+            "if(e.isContentEditable){e.textContent=$literal;e.dispatchEvent(new Event('input',{bubbles:true}));return true}" +
+            "return false})()"
+        val posted = webView.post {
+            try {
+                webView.evaluateJavascript(script) { result -> onResult(result == "true") }
+            } catch (_: Exception) {
+                onResult(false)
+            }
+        }
+        if (!posted) {
+            onResult(false)
+            return false
+        }
+        return true
     }
 
     fun control(

@@ -113,6 +113,11 @@ class ReceiverServer(
         init {
             setWebSocketFactory(DefaultSSLWebSocketServerFactory(sslContext))
             setMaxPendingConnections(MAX_PENDING_CONNECTIONS)
+            // Deliver small command/response frames immediately instead of waiting on Nagle batching.
+            isTcpNoDelay = true
+            // Ping every 30 s: notices a vanished phone sooner than 60 s, yet tolerates the short
+            // network pauses a phone has when its screen turns off.
+            connectionLostTimeout = 30
         }
 
         private val authenticatedClients = ConcurrentHashMap<WebSocket, String>()
@@ -361,7 +366,12 @@ class ReceiverServer(
         ) {
             val message = exception.message ?: "Unknown error"
 
-            if (connection == null) {
+            if (exception is javax.net.ssl.SSLException ||
+                exception.cause is javax.net.ssl.SSLException
+            ) {
+                // One failed handshake must not shut the whole receiver down; show why instead.
+                onStatusChanged("A phone could not complete the secure handshake: $message")
+            } else if (connection == null) {
                 onFatalError(message)
             } else {
                 onStatusChanged("Client connection error: $message")

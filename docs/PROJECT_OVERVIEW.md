@@ -10,22 +10,21 @@ TeleLink is a local-network remote system with a phone controller and a TV recei
 - Use local Wi-Fi; basic control does not depend on a cloud service.
 - Support an integrated TV browser and launch URLs in an external browser.
 - Produce private APKs for device testing before considering public distribution.
-- Prioritize the user's SIKO 43-inch Android TV and preserve compatibility for other Android TV devices.
+- Target Android TV devices broadly and preserve compatibility across models and firmware.
 
-## TV facts supplied by the user
+## Target devices
 
-- SIKO 43-inch Android LED TV, production model `SMART TV`.
-- Android 16; 2 GB RAM; 16 GB internal storage.
-- Firmware shown as `20260803_115713`, reported latest by the user.
-- Google Play Store is available; Google TV remote test returned `no_remote`.
-- Android TV Remote Service itself has not been confirmed in system apps.
-- TV connects over Wi-Fi. A USB flash drive is available for APK transfer.
+- Any Android TV running API 26 or newer (the TV app's minimum SDK).
+- Any Android phone running API 26 or newer for the remote app.
+- Both devices on the same reachable local Wi-Fi network.
+
+Behavior varies by TV firmware. Cross-app controls depend on an enabled Accessibility service, which some firmware hides or restricts; browser playback depends on the TV's codecs, DRM, and site behavior. APKs can be transferred by USB storage or installed over adb where the TV allows it.
 
 ## Current implementation
 
 The workspace has separate `android/tv/app` and `android/mobile` applications. Implemented source flows include receiver lifecycle, QR/PIN pairing, TLS fingerprint pinning, protected reconnect credentials, device revocation, NSD discovery, keyboard/navigation/touch commands, URL/text sharing, integrated/external browser opening, app listing/launch, and TV-side HTML video controls. Both debug and release APKs build. Release APKs are signed with a private local key and copied to `builds/release/` by `scripts/build-release.ps1`.
 
-Runtime integration, security assessment, and physical SIKO acceptance have not been completed. Source implementation and APK build success do not establish those results.
+Runtime integration, security assessment, and physical-device acceptance have not been completed. Source implementation and APK build success do not establish those results.
 
 ## Platform constraints
 
@@ -33,4 +32,4 @@ Cross-app input requires an explicitly enabled TV Accessibility service or a sup
 
 ## Completion criteria
 
-TeleLink 1.0 requires the TV and phone apps, secure pairing and device management, remote input and sharing, browser/playback paths, signed APKs, user documentation, and verified end-to-end operation. SIKO-specific compatibility requires installation and testing on the actual TV.
+TeleLink 1.0 requires the TV and phone apps, secure pairing and device management, remote input and sharing, browser/playback paths, signed APKs, user documentation, and verified end-to-end operation. Device-specific compatibility requires installation and testing on a physical Android TV.

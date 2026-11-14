@@ -1,35 +1,33 @@
 package com.telelink.remote
 
 import android.Manifest
+import android.content.ComponentName
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
+import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
+import android.os.IBinder
 import android.os.Looper
+import android.bluetooth.BluetoothAdapter
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.background
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.journeyapps.barcodescanner.ScanContract
@@ -44,7 +42,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         sharedText = readSharedText(intent)
-        setContent { TeleLinkRemoteScreen(sharedText) }
+        setContent {
+            TeleLinkRemoteTheme {
+                TeleLinkRemoteScreen(sharedText)
+            }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -68,17 +70,61 @@ class MainActivity : ComponentActivity() {
 private fun TeleLinkRemoteScreen(sharedText: String?) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
-    var status by remember { mutableStateOf("Scan the pairing QR shown on TeleLink TV") }
-    var target by remember { mutableStateOf<TvPairingPayload?>(null) }
-    var client by remember { mutableStateOf<TvRemoteClient?>(null) }
-    var isPaired by remember { mutableStateOf(false) }
+
+    // Both connections are owned by RemoteConnectionService. The screen only observes its state and
+    // forwards user actions, so rotating or backgrounding the screen never drops a connection.
+    var conn by remember { mutableStateOf(RemoteConnectionState()) }
+    var service by remember { mutableStateOf<RemoteConnectionService?>(null) }
+    val serviceConnection = remember(context) {
+        object : ServiceConnection {
+            override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+                service = (binder as? RemoteConnectionService.LocalBinder)?.service
+            }
+
+            override fun onServiceDisconnected(name: ComponentName?) {
+                service = null
+            }
+        }
+    }
+    DisposableEffect(context, serviceConnection) {
+        val bound = context.bindService(
+            Intent(context, RemoteConnectionService::class.java),
+            serviceConnection,
+            Context.BIND_AUTO_CREATE
+        )
+        onDispose { if (bound) context.unbindService(serviceConnection) }
+    }
+    DisposableEffect(service) {
+        val current = service
+        if (current == null) {
+            onDispose { }
+        } else {
+            val observer = RemoteConnectionObserver { state -> mainHandler.post { conn = state } }
+            current.addObserver(observer)
+            onDispose { current.removeObserver(observer) }
+        }
+    }
+
+    fun ensureServiceStarted() {
+        try {
+            ContextCompat.startForegroundService(
+                context,
+                Intent(context, RemoteConnectionService::class.java)
+            )
+        } catch (_: Exception) {
+            // The remote still works while the app is open if Android refuses the service.
+        }
+    }
+
+    fun setStatus(message: String) {
+        service?.setStatus(message)
+    }
+
+    // UI-flow state (discovery, pairing, input) stays on the screen; connection state comes from conn.
     var textInput by remember { mutableStateOf("") }
     var urlInput by remember { mutableStateOf("") }
-    var tvApps by remember { mutableStateOf<List<TvApp>>(emptyList()) }
     var pendingShare by remember { mutableStateOf<String?>(null) }
     var discoveredTvs by remember { mutableStateOf<List<DiscoveredTv>>(emptyList()) }
-    var savedCredentials by remember { mutableStateOf<List<SavedTvCredential>>(emptyList()) }
-    var credentialStoreError by remember { mutableStateOf<String?>(null) }
     var isDiscovering by remember { mutableStateOf(false) }
     var discoverySessionId by remember { mutableLongStateOf(0L) }
     var expectedFingerprint by remember { mutableStateOf<String?>(null) }
@@ -86,126 +132,87 @@ private fun TeleLinkRemoteScreen(sharedText: String?) {
     var pendingPermissionConnection by remember { mutableStateOf<TvPairingPayload?>(null) }
     var manualHost by remember { mutableStateOf("") }
     var useManualHost by remember { mutableStateOf(false) }
-    val credentialStore = remember { SecureCredentialStore(context) }
+    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+    var mode by rememberSaveable { mutableIntStateOf(0) }
     val discovery = remember { TvDiscovery(context) }
 
-    fun refreshSavedCredentials(): Boolean = try {
-        savedCredentials = credentialStore.list()
-        credentialStoreError = null
-        true
-    } catch (exception: Exception) {
-        credentialStoreError = exception.message
-            ?: "Saved TV credentials could not be read. Clear TeleLink Remote app data and pair again."
-        false
+    val isPaired = conn.isPaired
+    val target = conn.wifiTarget
+    val savedCredentials = conn.savedCredentials
+    val btStatus = conn.btStatus
+
+    fun startBluetoothRemote() {
+        ensureServiceStarted()
+        service?.startBluetooth()
     }
+
+    val btPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        if (grants.values.all { it }) startBluetoothRemote()
+        else service?.setBluetoothMessage("Allow the Nearby devices permission to use the Bluetooth remote")
+    }
+    val btVisibleLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { }
+    fun beginBluetoothRemote() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val needed = arrayOf(
+                Manifest.permission.BLUETOOTH_CONNECT,
+                Manifest.permission.BLUETOOTH_ADVERTISE
+            )
+            if (needed.any {
+                    ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
+                }
+            ) {
+                btPermissionLauncher.launch(needed)
+                return
+            }
+        }
+        startBluetoothRemote()
+    }
+
     val discoveryTimeout = remember {
         Runnable {
             discovery.stop()
             isDiscovering = false
-            if (discoveredTvs.isEmpty()) status = "No TeleLink TVs found. Check Wi-Fi or enter the TV address."
+            if (discoveredTvs.isEmpty()) setStatus("No TeleLink TVs found. Check Wi-Fi or enter the TV address.")
         }
     }
 
     fun connectToTv(pairing: TvPairingPayload) {
-        if (Build.VERSION.SDK_INT >= 37 && ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.ACCESS_LOCAL_NETWORK
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
-            val existingClient = client
-            client = null
-            existingClient?.close()
-            status = "Allow local network access before connecting to your TV"
-            isPaired = false
-            return
-        }
-        if (!refreshSavedCredentials()) return
-        client?.close()
-        val saved = savedCredentials.firstOrNull { it.fingerprint == pairing.fingerprint }
-        val connectionTarget = if (saved != null) {
-            pairing.copy(deviceId = saved.deviceId, token = saved.token, pin = "")
-        } else {
-            pairing
-        }
-        target = connectionTarget
-        isPaired = false
-        tvApps = emptyList()
-        status = "Connecting securely to ${connectionTarget.host}…"
-        lateinit var newClient: TvRemoteClient
-        newClient = TvRemoteClient(
-            target = connectionTarget,
-            onStatus = { value ->
-                mainHandler.post {
-                    if (client === newClient) {
-                        status = value
-                        if (isDisconnectedConnectionStatus(value)) {
-                            isPaired = false
-                        }
-                    }
-                }
-            },
-            onPaired = { success, message, deviceId, token ->
-                mainHandler.post {
-                    if (client === newClient) {
-                        isPaired = success
-                        status = if (success) "Paired with TV" else message
-                        if (success && deviceId != null && token != null) {
-                            try {
-                                credentialStore.save(
-                                    SavedTvCredential(
-                                        host = connectionTarget.host,
-                                        port = connectionTarget.port,
-                                        fingerprint = connectionTarget.fingerprint,
-                                        deviceId = deviceId,
-                                        token = token,
-                                        deviceName = "TeleLink TV"
-                                    )
-                                )
-                                refreshSavedCredentials()
-                            } catch (exception: Exception) {
-                                credentialStoreError = exception.message
-                                    ?: "Paired, but the reconnect credential could not be saved securely."
-                            }
-                        }
-                    }
-                }
-            },
-            onApps = { apps -> mainHandler.post { if (client === newClient) tvApps = apps } }
-        )
-        client = newClient
-        newClient.connect()
+        ensureServiceStarted()
+        service?.connectWifi(pairing)
     }
 
     val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
         if (result.contents == null) {
             expectedFingerprint = null
             useManualHost = false
-            status = "Pairing scan cancelled"
+            setStatus("Pairing scan cancelled")
         } else {
             val pairing = TvPairingPayload.parse(result.contents)
             if (pairing == null) {
-                status = "That QR code is not a valid TeleLink pairing code"
+                setStatus("That QR code is not a valid TeleLink pairing code")
             } else if (expectedFingerprint != null && pairing.fingerprint != expectedFingerprint) {
-                status = "The scanned code belongs to a different TV"
+                setStatus("The scanned code belongs to a different TV")
                 expectedFingerprint = null
             } else {
                 expectedFingerprint = null
-                val target = if (pairing.host.isBlank()) {
+                val resolved = if (pairing.host.isBlank()) {
                     discoveredTvs.firstOrNull { it.fingerprint == pairing.fingerprint }
                         ?.let { pairing.copy(host = it.host, port = it.port) }
                 } else {
                     pairing
                 }
                 val selectedTarget = if (useManualHost && manualHost.isNotBlank()) {
-                    target?.copy(host = manualHost.trim()) ?: pairing.copy(
-                        host = manualHost.trim()
-                    )
+                    resolved?.copy(host = manualHost.trim()) ?: pairing.copy(host = manualHost.trim())
                 } else {
-                    target
+                    resolved
                 }
                 useManualHost = false
                 if (selectedTarget == null || selectedTarget.host.isBlank()) {
-                    status = "TV IP is not shown yet. Discover TVs on Wi-Fi, then scan again."
+                    setStatus("TV IP is not shown yet. Discover TVs on Wi-Fi, then scan again.")
                 } else {
                     connectToTv(selectedTarget)
                 }
@@ -229,7 +236,7 @@ private fun TeleLinkRemoteScreen(sharedText: String?) {
         else {
             expectedFingerprint = null
             useManualHost = false
-            status = "Camera permission is needed to scan the TV's secure pairing code."
+            setStatus("Camera permission is needed to scan the TV's secure pairing code.")
         }
     }
 
@@ -239,7 +246,7 @@ private fun TeleLinkRemoteScreen(sharedText: String?) {
         discoveredTvs = emptyList()
         isDiscovering = true
         discoverySessionId = 0L
-        status = "Searching for TeleLink TVs on this Wi-Fi…"
+        setStatus("Searching for TeleLink TVs on this Wi-Fi…")
         discoverySessionId = discovery.start(
             onFound = { tv ->
                 mainHandler.post {
@@ -247,7 +254,7 @@ private fun TeleLinkRemoteScreen(sharedText: String?) {
                         if (discoveredTvs.none { it.fingerprint == tv.fingerprint }) {
                             discoveredTvs = discoveredTvs + tv
                         }
-                        status = "Found ${discoveredTvs.size} TeleLink TV${if (discoveredTvs.size == 1) "" else "s"}"
+                        setStatus("Found ${discoveredTvs.size} TeleLink TV${if (discoveredTvs.size == 1) "" else "s"}")
                     }
                 }
             },
@@ -256,14 +263,14 @@ private fun TeleLinkRemoteScreen(sharedText: String?) {
                     mainHandler.removeCallbacks(discoveryTimeout)
                     discovery.stop()
                     isDiscovering = false
-                    status = message
+                    setStatus(message)
                 }
             },
             onLost = { serviceName, sessionId ->
                 mainHandler.post {
                     if (isDiscovering && sessionId == discoverySessionId) {
                         discoveredTvs = discoveredTvs.filterNot { it.name == serviceName }
-                        status = if (discoveredTvs.isEmpty()) "The discovered TV is no longer available" else status
+                        if (discoveredTvs.isEmpty()) setStatus("The discovered TV is no longer available")
                     }
                 }
             }
@@ -289,12 +296,11 @@ private fun TeleLinkRemoteScreen(sharedText: String?) {
             } else {
                 scanPairingCode()
             }
-        }
-        else {
+        } else {
             pendingPermissionConnection = null
             expectedFingerprint = null
             useManualHost = false
-            status = "Allow local network access to connect to your TV"
+            setStatus("Allow local network access to connect to your TV")
         }
     }
 
@@ -337,10 +343,9 @@ private fun TeleLinkRemoteScreen(sharedText: String?) {
         if (!host.matches(Regex("[A-Za-z0-9.-]{1,253}")) ||
             host.startsWith('.') || host.endsWith('.') || host.contains("..")
         ) {
-            status = "Enter a valid IPv4 address or local host name"
+            setStatus("Enter a valid IPv4 address or local host name")
             return
         }
-        if (!refreshSavedCredentials()) return
         val saved = savedCredentials.lastOrNull()
         if (saved != null) {
             connectWithLocalNetworkPermission(
@@ -373,32 +378,22 @@ private fun TeleLinkRemoteScreen(sharedText: String?) {
         }
     }
 
+    val notificationLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { }
     LaunchedEffect(Unit) {
-        if (!refreshSavedCredentials()) return@LaunchedEffect
-        savedCredentials.lastOrNull()?.let { saved ->
-            if (Build.VERSION.SDK_INT < 37 || ContextCompat.checkSelfPermission(
-                    context,
-                    Manifest.permission.ACCESS_LOCAL_NETWORK
-                ) == PackageManager.PERMISSION_GRANTED
-            ) {
-                connectToTv(
-                    TvPairingPayload(
-                        host = saved.host,
-                        port = saved.port,
-                        fingerprint = saved.fingerprint,
-                        pin = "",
-                        deviceId = saved.deviceId,
-                        token = saved.token
-                    )
-                )
-            } else {
-                status = "Find your TV or allow local network access to reconnect"
-            }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
+        // Starting the service runs its one-time restore, reconnecting to the last saved TV.
+        ensureServiceStarted()
     }
 
-    LaunchedEffect(isPaired, client) {
-        if (isPaired) client?.sendCommand("LIST_APPS")
+    LaunchedEffect(isPaired) {
+        if (isPaired) service?.sendWifiCommand("LIST_APPS")
     }
 
     LaunchedEffect(sharedText) {
@@ -412,32 +407,30 @@ private fun TeleLinkRemoteScreen(sharedText: String?) {
         }
     }
 
-    DisposableEffect(client) {
-        onDispose { client?.close() }
+    LaunchedEffect(mode) {
+        if (mode == 1 && !btStatus.registered) beginBluetoothRemote()
     }
-    DisposableEffect(context, client) {
+
+    // If local-network access is revoked while a session is active, close it and stop discovery.
+    DisposableEffect(context, service) {
         val activity = findComponentActivity(context)
         if (activity == null) {
             onDispose { }
         } else {
             val permissionObserver = LifecycleEventObserver { _, event ->
-                val hasNetworkSession = client != null || isDiscovering
+                val hasNetworkSession = isPaired || target != null || isDiscovering
                 val permissionRevoked = Build.VERSION.SDK_INT >= 37 &&
                     ContextCompat.checkSelfPermission(
                         context,
                         Manifest.permission.ACCESS_LOCAL_NETWORK
                     ) != PackageManager.PERMISSION_GRANTED
                 if (event == Lifecycle.Event.ON_RESUME && hasNetworkSession && permissionRevoked) {
-                    val activeClient = client
-                    client = null
-                    activeClient?.close()
-                    isPaired = false
+                    service?.onLocalNetworkPermissionRevoked()
                     pendingPermissionConnection = null
                     mainHandler.removeCallbacks(discoveryTimeout)
                     discovery.stop()
                     isDiscovering = false
                     discoveredTvs = emptyList()
-                    status = "Local network access was revoked. Allow it in Settings, then reconnect."
                 }
             }
             activity.lifecycle.addObserver(permissionObserver)
@@ -451,303 +444,246 @@ private fun TeleLinkRemoteScreen(sharedText: String?) {
         }
     }
 
-    MaterialTheme {
-        Surface(Modifier.fillMaxSize()) {
+    fun sendShared(shared: String) {
+        val current = service ?: return
+        if (shared.startsWith("http://", true) || shared.startsWith("https://", true)) {
+            val error = current.sendWifiUrl(shared, "integrated")
+            if (error == null) pendingShare = null else setStatus(error)
+        } else {
+            current.sendWifiCommand("SHARE_TEXT", JSONObject().put("text", shared))
+            pendingShare = null
+        }
+    }
+
+    val bannerState = when {
+        conn.credentialStoreError != null -> BannerState.Error
+        isPaired -> BannerState.Connected
+        isDiscovering || conn.status.startsWith("Connecting") || conn.status.startsWith("Searching") -> BannerState.Busy
+        else -> BannerState.Idle
+    }
+    val knownTargetHasSavedPairing = target?.let { targetTv ->
+        savedCredentials.any { it.fingerprint == targetTv.fingerprint }
+    } == true
+
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        // safeDrawingPadding keeps the UI clear of the status bar, camera cut-out,
+        // navigation bar and on-screen keyboard (edge-to-edge is enforced on modern Android).
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .safeDrawingPadding()
+                .padding(horizontal = 20.dp)
+        ) {
+            BrandHeader(
+                connected = if (mode == 1) btStatus.connectedName != null else isPaired
+            )
+            Spacer(Modifier.height(12.dp))
+            SegmentedTabs(
+                labels = listOf("Wi-Fi remote", "Bluetooth remote"),
+                selected = mode,
+                onSelect = { mode = it }
+            )
+            Spacer(Modifier.height(12.dp))
+
+            if (mode == 0 && isPaired) {
+                SegmentedTabs(
+                    labels = listOf("Remote", "Type", "Apps", "TV"),
+                    selected = selectedTab,
+                    onSelect = { selectedTab = it }
+                )
+                Spacer(Modifier.height(12.dp))
+            }
+
+            BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            val viewportHeight = maxHeight
             Column(
                 modifier = Modifier
-                    .fillMaxSize()
+                    .fillMaxWidth()
                     .verticalScroll(rememberScrollState())
-                    .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Image(
-                        painter = painterResource(R.drawable.telelink_logo),
-                        contentDescription = "TeleLink logo",
-                        modifier = Modifier.width(260.dp).height(68.dp)
-                    )
-                    Text("Phone Remote", fontSize = 18.sp)
-                }
-                Spacer(Modifier.height(20.dp))
-                Text(credentialStoreError ?: status, style = MaterialTheme.typography.bodyMedium)
-                Spacer(Modifier.height(16.dp))
-
-                Button(
-                    onClick = { beginSecurePairing() },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(if (isPaired) "Scan another TV" else "Scan TV pairing code")
-                }
-
-                OutlinedButton(
-                    onClick = { beginDiscovery() },
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text(if (isDiscovering) "Searching for TVs…" else "Discover TVs on Wi-Fi") }
-
-                OutlinedTextField(
-                    value = manualHost,
-                    onValueChange = { manualHost = it },
-                    label = { Text("TV IP address or local host") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+            // Before pairing the content is centred in the screen; once paired it starts at the top.
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = viewportHeight),
+                verticalArrangement = Arrangement.spacedBy(
+                    16.dp,
+                    if (isPaired || mode == 1) Alignment.Top else Alignment.CenterVertically
                 )
-                TextButton(
-                    onClick = { connectUsingManualAddress() },
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text(if (savedCredentials.isEmpty()) "Scan QR and pair at this address" else "Connect at this address") }
-
-                discoveredTvs.forEach { tv ->
-                    Card(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                        Column(Modifier.padding(12.dp)) {
-                            Text(tv.name, fontWeight = FontWeight.SemiBold)
-                            Text("${tv.host}:${tv.port}", style = MaterialTheme.typography.bodySmall)
-                            val saved = savedCredentials.firstOrNull { it.fingerprint == tv.fingerprint }
-                            Button(
-                                onClick = {
-                                    if (saved != null) {
-                                        connectWithLocalNetworkPermission(
-                                            TvPairingPayload(
-                                                host = tv.host,
-                                                port = tv.port,
-                                                fingerprint = tv.fingerprint,
-                                                pin = "",
-                                                deviceId = saved.deviceId,
-                                                token = saved.token
-                                            )
-                                        )
-                                    } else {
-                                        expectedFingerprint = tv.fingerprint
-                                        beginSecurePairing()
-                                    }
-                                },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(if (saved != null) "Reconnect" else "Scan QR to trust and pair")
-                            }
+            ) {
+                if (mode == 1) {
+                    StatusBanner(
+                        btStatus.message,
+                        when {
+                            btStatus.connectedName != null -> BannerState.Connected
+                            btStatus.busy -> BannerState.Busy
+                            else -> BannerState.Idle
                         }
-                    }
-                }
-
-                if (!isPaired && target?.let { targetTv ->
-                        savedCredentials.any { it.fingerprint == targetTv.fingerprint }
-                    } == true
-                ) {
-                    OutlinedButton(
-                        onClick = {
-                            client?.close()
-                            client = null
-                            try {
-                                target?.fingerprint?.let(credentialStore::remove)
-                                refreshSavedCredentials()
-                            } catch (exception: Exception) {
-                                credentialStoreError = exception.message
-                                    ?: "Saved pairing could not be removed securely."
-                            }
-                            target = null
-                            tvApps = emptyList()
-                            status = "Saved pairing removed. Scan the TV code to pair again."
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text("Forget saved pairing and pair again") }
-                }
-
-                if (target != null) {
-                    Spacer(Modifier.height(20.dp))
-                    Text("TV ${target!!.host}:${target!!.port}")
-                    Text(
-                        "Certificate verified from the QR code",
-                        color = MaterialTheme.colorScheme.primary
                     )
+                } else {
+                    StatusBanner(conn.credentialStoreError ?: conn.status, bannerState)
                 }
 
                 pendingShare?.let { shared ->
-                    Card(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
-                        Column(Modifier.padding(12.dp)) {
-                            Text("Shared from another app", fontWeight = FontWeight.SemiBold)
-                            Text(shared.take(300), style = MaterialTheme.typography.bodySmall)
-                            Button(
-                                onClick = {
-                                    if (shared.startsWith("http://", true) || shared.startsWith("https://", true)) {
-                                        val error = sendUrl(client, shared, "integrated")
-                                        if (error == null) pendingShare = null else status = error
-                                    } else {
-                                        client?.sendCommand(
-                                            "SHARE_TEXT",
-                                            JSONObject().put("text", shared)
-                                        )
-                                        pendingShare = null
-                                    }
-                                },
-                                enabled = isPaired,
-                                modifier = Modifier.fillMaxWidth()
-                            ) { Text(if (shared.startsWith("http", true)) "Open on TV" else "Send to TV") }
-                        }
-                    }
+                    SharedCard(
+                        shared = shared,
+                        isPaired = isPaired,
+                        onSend = { sendShared(shared) }
+                    )
                 }
 
-                if (isPaired) {
-                    Spacer(Modifier.height(24.dp))
-                    HorizontalDivider()
-                    Spacer(Modifier.height(16.dp))
-
-                    Text("Navigation", fontWeight = FontWeight.SemiBold)
-                    Spacer(Modifier.height(8.dp))
-                    Button(onClick = { sendKey(client, "UP") }) { Text("▲") }
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Button(onClick = { sendKey(client, "LEFT") }) { Text("◀") }
-                        Button(onClick = { sendKey(client, "SELECT") }) { Text("OK") }
-                        Button(onClick = { sendKey(client, "RIGHT") }) { Text("▶") }
-                    }
-                    Button(onClick = { sendKey(client, "DOWN") }) { Text("▼") }
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        OutlinedButton(onClick = { sendKey(client, "BACK") }) { Text("Back") }
-                        OutlinedButton(onClick = { sendKey(client, "HOME") }) { Text("Home") }
-                    }
-
-                    Spacer(Modifier.height(18.dp))
-                    Text("Touchpad", fontWeight = FontWeight.SemiBold)
-                    Spacer(Modifier.height(8.dp))
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(200.dp)
-                            .pointerInput(client, isPaired) {
-                                awaitEachGesture {
-                                    val down = awaitFirstDown(requireUnconsumed = false)
-                                    val start = down.position
-                                    var end = start
-                                    var event: androidx.compose.ui.input.pointer.PointerEvent
-                                    do {
-                                        event = awaitPointerEvent()
-                                        val change = event.changes.first()
-                                        end = change.position
-                                        change.consume()
-                                    } while (event.changes.any { it.pressed })
-                                    val width = size.width.toFloat().coerceAtLeast(1f)
-                                    val height = size.height.toFloat().coerceAtLeast(1f)
-                                    client?.sendCommand(
-                                        "TOUCH_GESTURE",
-                                        JSONObject()
-                                            .put("x", start.x / width)
-                                            .put("y", start.y / height)
-                                            .put("endX", end.x / width)
-                                            .put("endY", end.y / height)
-                                            .put("durationMs", 180)
-                                    )
-                                }
-                            },
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                    ) {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text("Tap or swipe to control the TV screen")
-                        }
-                    }
-
-                    Spacer(Modifier.height(18.dp))
-                    OutlinedTextField(
-                        value = textInput,
-                        onValueChange = { textInput = it },
-                        label = { Text("Type text for the TV") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Button(
-                        onClick = {
-                            client?.sendCommand(
-                                "TEXT_INPUT",
-                                JSONObject().put("text", textInput)
-                            )
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text("Send text") }
-
-                    Spacer(Modifier.height(18.dp))
-                    OutlinedTextField(
-                        value = urlInput,
-                        onValueChange = { urlInput = it },
-                        label = { Text("URL to open on TV") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            onClick = {
-                                sendUrl(client, urlInput, "integrated")?.let { status = it }
-                            },
-                            modifier = Modifier.weight(1f)
-                        ) { Text("Open in TeleLink") }
-                        OutlinedButton(
-                            onClick = {
-                                sendUrl(client, urlInput, "external")?.let { status = it }
-                            },
-                            modifier = Modifier.weight(1f)
-                        ) { Text("External browser") }
-                    }
-
-                    Spacer(Modifier.height(18.dp))
-                    Text("TV apps", fontWeight = FontWeight.SemiBold)
-                    if (tvApps.isEmpty()) {
-                        Text("No launchable apps were returned")
-                    } else {
-                        tvApps.forEach { app ->
-                            OutlinedButton(
-                                onClick = {
-                                    client?.sendCommand(
-                                        "LAUNCH_APP",
-                                        JSONObject().put("packageName", app.packageName)
-                                    )
-                                },
-                                modifier = Modifier.fillMaxWidth()
-                            ) { Text(app.name) }
-                        }
-                    }
-
-                    Spacer(Modifier.height(18.dp))
-                    Text("Playback", fontWeight = FontWeight.SemiBold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { sendMedia(client, "PLAY") }) { Text("Play") }
-                        Button(onClick = { sendMedia(client, "PAUSE") }) { Text("Pause") }
-                        OutlinedButton(onClick = { sendMedia(client, "STOP") }) { Text("Stop") }
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { sendMedia(client, "SEEK_BACK") }) { Text("−10 sec") }
-                        OutlinedButton(onClick = { sendMedia(client, "SEEK_FORWARD") }) { Text("+10 sec") }
-                        OutlinedButton(onClick = { sendMedia(client, "VOLUME_DOWN") }) { Text("Vol −") }
-                        OutlinedButton(onClick = { sendMedia(client, "VOLUME_UP") }) { Text("Vol +") }
-                    }
-                    OutlinedButton(
-                        onClick = {
-                            client?.close()
-                            client = null
-                            target = null
-                            isPaired = false
-                            status = "Disconnected"
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text("Disconnect") }
-                    TextButton(
-                        onClick = {
-                            client?.close()
-                            client = null
-                            isPaired = false
+                if (mode == 1) {
+                    BluetoothContent(
+                        status = btStatus,
+                        devices = conn.btDevices,
+                        onStart = { beginBluetoothRemote() },
+                        onMakeVisible = {
                             try {
-                                target?.fingerprint?.let(credentialStore::remove)
-                                refreshSavedCredentials()
-                            } catch (exception: Exception) {
-                                credentialStoreError = exception.message
-                                    ?: "Saved pairing could not be removed securely."
+                                btVisibleLauncher.launch(
+                                    Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE)
+                                        .putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 300)
+                                )
+                            } catch (_: Exception) {
+                                service?.setBluetoothMessage("Could not make the phone visible. Use Bluetooth settings instead.")
                             }
-                            status = "Saved TV credentials removed from this phone"
                         },
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text("Forget saved TV on this phone") }
+                        onOpenSettings = {
+                            try {
+                                context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
+                            } catch (_: Exception) {
+                                service?.setBluetoothMessage("Open your phone's Bluetooth settings manually")
+                            }
+                        },
+                        onRefresh = { service?.refreshBluetoothDevices() },
+                        onConnect = { service?.connectBluetooth(it.address) },
+                        onDisconnect = { service?.disconnectBluetooth() },
+                        onKey = { service?.sendBluetoothKey(it) },
+                        onMedia = { service?.sendBluetoothMedia(it) },
+                        onMove = { dx, dy -> service?.moveBluetoothMouse(dx, dy) },
+                        onClick = { service?.clickBluetooth() },
+                        onScroll = { service?.scrollBluetooth(it) },
+                        onType = { service?.typeBluetooth(it) }
+                    )
+                } else if (isPaired) {
+                    when (selectedTab) {
+                        0 -> RemoteTab(
+                            onKey = { key ->
+                                service?.sendWifiCommand("KEY_PRESS", JSONObject().put("key", key))
+                            },
+                            onMedia = { action ->
+                                service?.sendWifiCommand("MEDIA_CONTROL", JSONObject().put("action", action))
+                            },
+                            onGesture = { startX, startY, endX, endY, durationMs ->
+                                service?.sendWifiCommand(
+                                    "TOUCH_GESTURE",
+                                    JSONObject()
+                                        .put("x", startX)
+                                        .put("y", startY)
+                                        .put("endX", endX)
+                                        .put("endY", endY)
+                                        .put("durationMs", durationMs)
+                                )
+                            }
+                        )
+
+                        1 -> TypeTab(
+                            textInput = textInput,
+                            onTextChange = { textInput = it },
+                            onSendText = {
+                                service?.sendWifiCommand(
+                                    "TEXT_INPUT",
+                                    JSONObject().put("text", textInput)
+                                )
+                            },
+                            urlInput = urlInput,
+                            onUrlChange = { urlInput = it },
+                            onOpenIntegrated = {
+                                service?.sendWifiUrl(urlInput, "integrated")?.let { setStatus(it) }
+                            },
+                            onOpenExternal = {
+                                service?.sendWifiUrl(urlInput, "external")?.let { setStatus(it) }
+                            }
+                        )
+
+                        2 -> AppsTab(
+                            apps = conn.tvApps,
+                            onLaunch = { app ->
+                                service?.sendWifiCommand(
+                                    "LAUNCH_APP",
+                                    JSONObject().put("packageName", app.packageName)
+                                )
+                            },
+                            onRefresh = { service?.sendWifiCommand("LIST_APPS") }
+                        )
+
+                        else -> TvInfoTab(
+                            hostPort = target?.let { "${it.host}:${it.port}" } ?: "",
+                            onDisconnect = {
+                                service?.disconnectWifi(
+                                    message = "Disconnected",
+                                    forget = false,
+                                    clearTarget = true
+                                )
+                            },
+                            onForget = {
+                                service?.disconnectWifi(
+                                    message = "Saved TV credentials removed from this phone",
+                                    forget = true,
+                                    clearTarget = false
+                                )
+                            }
+                        )
+                    }
+                } else {
+                    ConnectContent(
+                        isDiscovering = isDiscovering,
+                        discoveredTvs = discoveredTvs,
+                        savedFingerprints = savedCredentials.map { it.fingerprint }.toSet(),
+                        manualHost = manualHost,
+                        onManualHostChange = { manualHost = it },
+                        manualActionLabel = if (savedCredentials.isEmpty()) {
+                            "Scan QR and pair at this address"
+                        } else {
+                            "Connect at this address"
+                        },
+                        showForgetPairing = knownTargetHasSavedPairing,
+                        onScan = { beginSecurePairing() },
+                        onDiscover = { beginDiscovery() },
+                        onManualConnect = { connectUsingManualAddress() },
+                        onTvClick = { tv ->
+                            val saved = savedCredentials.firstOrNull { it.fingerprint == tv.fingerprint }
+                            if (saved != null) {
+                                connectWithLocalNetworkPermission(
+                                    TvPairingPayload(
+                                        host = tv.host,
+                                        port = tv.port,
+                                        fingerprint = tv.fingerprint,
+                                        pin = "",
+                                        deviceId = saved.deviceId,
+                                        token = saved.token
+                                    )
+                                )
+                            } else {
+                                expectedFingerprint = tv.fingerprint
+                                beginSecurePairing()
+                            }
+                        },
+                        onForgetPairing = {
+                            service?.disconnectWifi(
+                                message = "Saved pairing removed. Scan the TV code to pair again.",
+                                forget = true,
+                                clearTarget = true
+                            )
+                        }
+                    )
                 }
+                ContactDeveloperPanel(onError = { setStatus(it) })
+                Spacer(Modifier.height(8.dp))
+            }
+            }
             }
         }
     }
-}
-
-private fun sendKey(client: TvRemoteClient?, key: String) {
-    client?.sendCommand("KEY_PRESS", JSONObject().put("key", key))
 }
 
 private fun findComponentActivity(context: Context): ComponentActivity? {
@@ -757,20 +693,4 @@ private fun findComponentActivity(context: Context): ComponentActivity? {
         current = current.baseContext
     }
     return current as? ComponentActivity
-}
-
-private fun sendUrl(client: TvRemoteClient?, value: String, target: String): String? {
-    val url = value.trim()
-    validateOpenUrl(url)?.let { return it }
-    val connectedClient = client ?: return "Connect and pair with a TV first"
-    if (!connectedClient.isOpen) return "Connect and pair with a TV first"
-    connectedClient.sendCommand(
-        "OPEN_URL",
-        JSONObject().put("url", url).put("target", target)
-    )
-    return null
-}
-
-private fun sendMedia(client: TvRemoteClient?, action: String) {
-    client?.sendCommand("MEDIA_CONTROL", JSONObject().put("action", action))
 }

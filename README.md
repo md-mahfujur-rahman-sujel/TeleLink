@@ -11,11 +11,11 @@ TeleLink 1.0 contains two native Android apps:
 - **TeleLink TV:** receiver, pairing and device management, browser/playback surface, and TV-side command execution.
 - **TeleLink Remote:** TV discovery, secure pairing/reconnection, keyboard, D-pad/touchpad, URL/text sharing, app launch, and playback controls.
 
-The first compatibility target is the user's SIKO 43-inch Android TV, reported as Android 16 with 2 GB RAM and 16 GB storage. Private APK testing precedes any public distribution.
+TeleLink targets Android TV devices broadly (minimum API 26) rather than one specific model, and preserves compatibility across TV firmware. Private APK testing precedes any public distribution.
 
 ## Current state
 
-Source implementations cover the product features listed above. The TV receiver now runs in a user-started connected-device foreground service with an ongoing notification, including when an external browser or TV app is open. Both apps have debug and release variants. The release build is configured to use the private signing key stored locally under android/tv/signing; the key and android/tv/keystore.properties are excluded from source control. The signed private APKs are published to builds/release by the build script. LAN interoperability, security review, and SIKO hardware behavior still require validation.
+Source implementations cover the product features listed above. The TV receiver now runs in a user-started connected-device foreground service with an ongoing notification, including when an external browser or TV app is open. Both apps have debug and release variants. The release build is configured to use the private signing key stored locally under android/tv/signing; the key and android/tv/keystore.properties are excluded from source control. The signed private APKs are published to builds/release by the build script. LAN interoperability, security review, and on-device hardware behavior still require validation.
 
 ## Build
 
@@ -31,7 +31,7 @@ For debug builds, run from android/tv:
 .\gradlew.bat :app:assembleDebug :mobile:assembleDebug
 ```
 
-Back up the private signing keystore securely. Losing it prevents future updates over these APKs. Do not publish the keystore or password properties file. A successful build does not prove runtime interoperability or SIKO compatibility.
+Back up the private signing keystore securely. Losing it prevents future updates over these APKs. Do not publish the keystore or password properties file. A successful build does not prove runtime interoperability or device compatibility.
 
 ## Product documentation
 

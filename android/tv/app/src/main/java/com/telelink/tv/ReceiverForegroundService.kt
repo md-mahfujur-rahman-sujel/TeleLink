@@ -17,6 +17,8 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import androidx.core.content.ContextCompat
+import com.telelink.tv.network.CommandResult
+import com.telelink.tv.network.LowLatencyWifi
 import com.telelink.tv.network.ReceiverServer
 import com.telelink.tv.network.TvCommandRouter
 import com.telelink.tv.network.TvServicePublisher
@@ -24,6 +26,7 @@ import com.telelink.tv.security.PairedDevice
 import com.telelink.tv.security.PairedDeviceStore
 import com.telelink.tv.security.PairingManager
 import com.telelink.tv.security.TlsIdentity
+import org.java_websocket.WebSocket
 import org.json.JSONObject
 import java.util.concurrent.Executors
 
@@ -51,6 +54,9 @@ class ReceiverForegroundService : Service() {
     private val binder = LocalBinder()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val tlsExecutor = Executors.newSingleThreadExecutor()
+    // Navigation keys and swipes run here, off the main thread, in strict arrival order.
+    private val inputExecutor = Executors.newSingleThreadExecutor()
+    private val wifiLatencyLock by lazy { LowLatencyWifi(this) }
     private val pairingManager = PairingManager()
     private lateinit var tlsIdentity: TlsIdentity
     private lateinit var servicePublisher: TvServicePublisher
@@ -59,7 +65,7 @@ class ReceiverForegroundService : Service() {
     private var pairedDeviceStorageError: String? = null
     private lateinit var receiver: ReceiverServer
     private var observer: ReceiverSnapshotObserver? = null
-    private var pendingRemoteLaunch: PendingRemoteLaunch? = null
+    @Volatile private var pendingRemoteLaunch: PendingRemoteLaunch? = null
     @Volatile private var startGeneration = 0
     @Volatile private var snapshot = ReceiverSnapshot()
 
@@ -113,29 +119,41 @@ class ReceiverForegroundService : Service() {
             },
             onStatusChanged = ::handleReceiverStatus,
             onCommandReceived = { connection, command ->
-                mainHandler.post {
-                    if (!receiver.isAuthenticated(connection)) return@post
-                    if (pendingRemoteLaunch != null) {
-                        clearPendingRemoteLaunch()
-                        refreshForegroundNotification()
-                    }
-                    commandRouter.execute(command) { result ->
-                        if (connection.isOpen) {
-                            try {
-                                connection.send(
-                                    JSONObject()
-                                        .put("type", "COMMAND_RESULT")
-                                        .put("requestId", command.optString("requestId"))
-                                        .put("success", result.success)
-                                        .put("message", result.message)
-                                        .put("data", result.data ?: JSONObject())
-                                        .toString()
-                                )
-                            } catch (_: Exception) {
-                                // The peer may disconnect between the open check and the send.
+                if (command.optString("type") in FAST_INPUT_COMMANDS) {
+                    // Rapid key presses and swipes skip the main thread so they never queue behind
+                    // UI work, and they no longer repaint the screen or notification each time.
+                    try {
+                        inputExecutor.execute {
+                            if (!receiver.isAuthenticated(connection)) return@execute
+                            if (pendingRemoteLaunch != null) {
+                                mainHandler.post {
+                                    clearPendingRemoteLaunch()
+                                    refreshForegroundNotification()
+                                }
+                            }
+                            commandRouter.execute(command) { result ->
+                                sendCommandResult(connection, command, result)
+                                if (!result.success) {
+                                    mainHandler.post {
+                                        updateSnapshot { it.copy(status = result.message) }
+                                    }
+                                }
                             }
                         }
-                        updateSnapshot { it.copy(status = result.message) }
+                    } catch (_: java.util.concurrent.RejectedExecutionException) {
+                        // Service is shutting down.
+                    }
+                } else {
+                    mainHandler.post {
+                        if (!receiver.isAuthenticated(connection)) return@post
+                        if (pendingRemoteLaunch != null) {
+                            clearPendingRemoteLaunch()
+                            refreshForegroundNotification()
+                        }
+                        commandRouter.execute(command) { result ->
+                            sendCommandResult(connection, command, result)
+                            updateSnapshot { it.copy(status = result.message) }
+                        }
                     }
                 }
             },
@@ -205,6 +223,23 @@ class ReceiverForegroundService : Service() {
         }
     }
 
+    private fun sendCommandResult(connection: WebSocket, command: JSONObject, result: CommandResult) {
+        if (!connection.isOpen) return
+        try {
+            connection.send(
+                JSONObject()
+                    .put("type", "COMMAND_RESULT")
+                    .put("requestId", command.optString("requestId"))
+                    .put("success", result.success)
+                    .put("message", result.message)
+                    .put("data", result.data ?: JSONObject())
+                    .toString()
+            )
+        } catch (_: Exception) {
+            // The peer may disconnect between the open check and the send.
+        }
+    }
+
     fun refreshIpAddress() {
         updateSnapshot { it.copy(ipAddress = getLocalIpAddress(this)) }
     }
@@ -234,6 +269,7 @@ class ReceiverForegroundService : Service() {
             return
         }
         val generation = ++startGeneration
+        wifiLatencyLock.acquire()
         val pin = pairingManager.startSession()
         updateSnapshot {
             it.copy(
@@ -286,6 +322,7 @@ class ReceiverForegroundService : Service() {
         pairingManager.invalidatePin()
         servicePublisher.stop()
         receiver.stop(status)
+        wifiLatencyLock.release()
         updateSnapshot {
             it.copy(
                 running = false,
@@ -483,7 +520,9 @@ class ReceiverForegroundService : Service() {
         pairingManager.invalidatePin()
         servicePublisher.stop()
         receiver.stop()
+        wifiLatencyLock.release()
         tlsExecutor.shutdownNow()
+        inputExecutor.shutdownNow()
         observer = null
         super.onDestroy()
     }
@@ -496,6 +535,7 @@ class ReceiverForegroundService : Service() {
         const val ACTION_EXECUTE_PENDING_LAUNCH = "com.telelink.tv.receiver.EXECUTE_PENDING_LAUNCH"
         const val EXTRA_PENDING_LAUNCH_TOKEN = "com.telelink.tv.receiver.PENDING_LAUNCH_TOKEN"
         private const val RECEIVER_PORT = 8765
+        private val FAST_INPUT_COMMANDS = setOf("KEY_PRESS", "TOUCH_GESTURE")
         private const val PIN_TICK_MS = 1000L
         private const val PIN_VALIDITY_SECONDS = 5 * 60
         private const val NOTIFICATION_CHANNEL_ID = "telelink_receiver"

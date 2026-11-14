@@ -3,6 +3,7 @@ package com.telelink.tv
 import android.app.Activity
 import android.app.Application
 import android.os.Bundle
+import java.lang.ref.WeakReference
 import java.util.UUID
 
 data class AuthorizedRemoteLaunch(
@@ -61,14 +62,26 @@ class TeleLinkApplication : Application(), Application.ActivityLifecycleCallback
     }
 
     override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
-    override fun onActivityResumed(activity: Activity) = Unit
-    override fun onActivityPaused(activity: Activity) = Unit
+    override fun onActivityResumed(activity: Activity) {
+        resumedActivityRef = WeakReference(activity)
+    }
+
+    override fun onActivityPaused(activity: Activity) {
+        if (resumedActivityRef?.get() === activity) resumedActivityRef = null
+    }
+
     override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
     override fun onActivityDestroyed(activity: Activity) = Unit
 
     companion object {
         @Volatile
         private var visibleActivityCount = 0
+
+        @Volatile
+        private var resumedActivityRef: WeakReference<Activity>? = null
+
+        /** The TeleLink screen currently in front, used to navigate it without Accessibility. */
+        fun resumedActivity(): Activity? = resumedActivityRef?.get()
 
         val hasVisibleActivity: Boolean
             get() = visibleActivityCount > 0

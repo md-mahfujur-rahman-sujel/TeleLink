@@ -63,4 +63,4 @@ An Android Accessibility service is opt-in and must be clearly disclosed. Use su
 
 ## Android compatibility
 
-The TV is reported to run Android 16. Google TV Remote test returned `no_remote`; the exact Android TV Remote Service installation is unconfirmed. TeleLink must work through its own companion app and must not depend exclusively on Google's remote service. The manifest targets API 37. The TV requests local-network permission before receiver startup, and the phone gates discovery, pairing, and saved-device connections on API 37+; the connection entry point also checks permission before opening a socket. Verify this behavior on supported devices before release.
+TeleLink works through its own companion app and does not depend on Google's remote service, which is absent or restricted on some TV firmware. The manifest targets API 37. The TV requests local-network permission before receiver startup, and the phone gates discovery, pairing, and saved-device connections on API 37+; the connection entry point also checks permission before opening a socket. Verify this behavior on supported devices before release.
