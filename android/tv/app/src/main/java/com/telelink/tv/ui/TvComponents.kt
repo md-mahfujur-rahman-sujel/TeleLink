@@ -46,19 +46,22 @@ import com.telelink.tv.ui.theme.TeleBlue
 import com.telelink.tv.ui.theme.TeleBlueDeep
 import com.telelink.tv.ui.theme.TeleDanger
 import com.telelink.tv.ui.theme.TeleTeal
-import com.telelink.tv.ui.theme.TeleTextMuted
 
 enum class TvButtonStyle { Primary, Secondary, Danger }
 
 /** Gradient canvas with two soft brand glows so the translucent glass panels have depth to sit on. */
 @Composable
 fun TvBackdrop(modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    val isDark = scheme.background.red < 0.5f
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(
-                Brush.verticalGradient(
+                if (isDark) Brush.verticalGradient(
                     listOf(Color(0xFF0A1120), Color(0xFF0B1425), Color(0xFF101F3A))
+                ) else Brush.verticalGradient(
+                    listOf(Color(0xFFF7F9FD), Color(0xFFEAF0FA), Color(0xFFF4F7FC))
                 )
             )
     ) {
@@ -107,7 +110,11 @@ fun TvButton(
         style == TvButtonStyle.Danger -> Brush.verticalGradient(
             listOf(TeleDanger.copy(alpha = 0.16f), TeleDanger.copy(alpha = 0.08f))
         )
-        else -> Brush.verticalGradient(listOf(GlassFillTop, GlassFillBottom))
+        else -> if (scheme.background.red < 0.5f) {
+            Brush.verticalGradient(listOf(GlassFillTop, GlassFillBottom))
+        } else {
+            Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.92f), scheme.surfaceVariant.copy(alpha = 0.72f)))
+        }
     }
     val content = when {
         focused -> scheme.onPrimary
@@ -118,7 +125,7 @@ fun TvButton(
     val borderColor = when {
         focused -> Color.White
         style == TvButtonStyle.Danger -> TeleDanger.copy(alpha = 0.6f)
-        else -> GlassBorder
+        else -> if (scheme.background.red < 0.5f) GlassBorder else scheme.outlineVariant
     }
 
     Surface(
@@ -154,11 +161,16 @@ fun TvButton(
 @Composable
 fun TvCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     val shape = RoundedCornerShape(22.dp)
+    val scheme = MaterialTheme.colorScheme
+    val isDark = scheme.background.red < 0.5f
     Box(
         modifier = modifier
             .clip(shape)
-            .background(Brush.verticalGradient(listOf(GlassFillTop, GlassFillBottom)))
-            .border(BorderStroke(1.dp, GlassBorder), shape)
+            .background(
+                if (isDark) Brush.verticalGradient(listOf(GlassFillTop, GlassFillBottom))
+                else Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.96f), scheme.surfaceVariant.copy(alpha = 0.75f)))
+            )
+            .border(BorderStroke(1.dp, if (isDark) GlassBorder else scheme.outlineVariant), shape)
     ) {
         Column(modifier = Modifier.padding(20.dp), content = content)
     }
@@ -169,7 +181,7 @@ fun SectionLabel(text: String, modifier: Modifier = Modifier) {
     Text(
         text = text.uppercase(),
         style = MaterialTheme.typography.labelMedium,
-        color = TeleTextMuted,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
         letterSpacing = 1.5.sp,
         fontWeight = FontWeight.SemiBold,
         modifier = modifier
@@ -188,7 +200,7 @@ fun InfoRow(label: String, value: String) {
         Text(
             text = label,
             style = MaterialTheme.typography.bodyMedium,
-            color = TeleTextMuted
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Text(
             text = value,

@@ -21,7 +21,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.unit.dp
 import com.google.zxing.qrcode.encoder.ByteMatrix
 import com.telelink.tv.ui.theme.TeleBlue
-import com.telelink.tv.ui.theme.TeleTextMuted
 
 data class DeveloperLink(val label: String, val display: String, val url: String)
 
@@ -80,19 +79,19 @@ fun TvContactScreen(
                 Text(
                     text = "Developer of TeleLink",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = TeleTextMuted
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(Modifier.height(16.dp))
                 DeveloperInfo.links.forEach { link ->
                     Text(
                         text = link.label.uppercase(),
                         style = MaterialTheme.typography.labelMedium,
-                        color = TeleTextMuted
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
                         text = link.display,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = TeleBlue
+                        color = MaterialTheme.colorScheme.primary
                     )
                     Spacer(Modifier.height(8.dp))
                 }

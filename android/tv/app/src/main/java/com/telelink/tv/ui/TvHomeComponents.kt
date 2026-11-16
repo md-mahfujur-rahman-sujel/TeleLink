@@ -38,8 +38,6 @@ import com.telelink.tv.R
 import com.telelink.tv.security.PairedDevice
 import com.telelink.tv.ui.theme.TeleBlue
 import com.telelink.tv.ui.theme.TeleTeal
-import com.telelink.tv.ui.theme.TeleText
-import com.telelink.tv.ui.theme.TeleTextMuted
 
 @Composable
 fun TvBrandHeader(modifier: Modifier = Modifier) {
@@ -55,7 +53,7 @@ fun TvBrandHeader(modifier: Modifier = Modifier) {
         Column {
             Text(
                 text = buildAnnotatedString {
-                    withStyle(SpanStyle(color = TeleText)) { append("Tele") }
+                    withStyle(SpanStyle(color = MaterialTheme.colorScheme.onBackground)) { append("Tele") }
                     withStyle(SpanStyle(color = TeleBlue)) { append("Link") }
                 },
                 style = MaterialTheme.typography.headlineMedium
@@ -63,7 +61,7 @@ fun TvBrandHeader(modifier: Modifier = Modifier) {
             Text(
                 text = "TV Receiver",
                 style = MaterialTheme.typography.bodyMedium,
-                color = TeleTextMuted
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
@@ -80,7 +78,7 @@ fun ReceiverStatusCard(
     val dot = when {
         running -> TeleTeal
         starting -> TeleBlue
-        else -> TeleTextMuted
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
     TvCard(modifier = modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -101,7 +99,7 @@ fun ReceiverStatusCard(
             Text(
                 text = "Notifications are off. Use Stop Receiver here when finished.",
                 style = MaterialTheme.typography.bodySmall,
-                color = TeleTextMuted
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
@@ -137,13 +135,13 @@ fun PairingCard(
                         Text(
                             text = "The code verifies this TV before pairing.",
                             style = MaterialTheme.typography.bodySmall,
-                            color = TeleTextMuted
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Spacer(Modifier.height(16.dp))
                         Text(
                             text = "OR ENTER PIN",
                             style = MaterialTheme.typography.labelMedium,
-                            color = TeleTextMuted,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             letterSpacing = 1.5.sp
                         )
                         Text(
@@ -156,7 +154,7 @@ fun PairingCard(
                             text = "Expires in %d:%02d, then a new PIN is issued."
                                 .format(secondsRemaining / 60, secondsRemaining % 60),
                             style = MaterialTheme.typography.bodySmall,
-                            color = TeleTextMuted
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -165,13 +163,13 @@ fun PairingCard(
             receiverActive -> Text(
                 text = "Preparing a secure pairing code…",
                 style = MaterialTheme.typography.bodyLarge,
-                color = TeleTextMuted
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
             else -> Text(
                 text = "Select Start Receiver to show a pairing code for your phone.",
                 style = MaterialTheme.typography.bodyLarge,
-                color = TeleTextMuted
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
@@ -206,7 +204,7 @@ fun PairedPhonesCard(
             Text(
                 text = "No phones paired yet.",
                 style = MaterialTheme.typography.bodyMedium,
-                color = TeleTextMuted
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

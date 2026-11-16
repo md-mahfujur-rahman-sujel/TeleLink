@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -60,7 +61,11 @@ internal enum class BannerState { Idle, Busy, Connected, Error }
 internal enum class RemoteButtonKind { Primary, Tonal, Outlined, Danger }
 
 @Composable
-internal fun BrandHeader(connected: Boolean, modifier: Modifier = Modifier) {
+internal fun BrandHeader(
+    connected: Boolean,
+    modifier: Modifier = Modifier,
+    onSettings: () -> Unit
+) {
     val scheme = MaterialTheme.colorScheme
     Row(
         modifier = modifier
@@ -114,6 +119,14 @@ internal fun BrandHeader(connected: Boolean, modifier: Modifier = Modifier) {
                     )
                 }
             }
+        }
+        IconButton(onClick = onSettings) {
+            Text(
+                text = "⚙︎",
+                style = MaterialTheme.typography.titleLarge,
+                color = scheme.onSurfaceVariant,
+                modifier = Modifier.semantics { contentDescription = "Settings" }
+            )
         }
     }
 }

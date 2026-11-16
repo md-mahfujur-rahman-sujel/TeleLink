@@ -30,6 +30,10 @@ If the TV is not found, confirm both devices use the same Wi-Fi and that the rou
 - Use play, pause, stop, 10-second seek, and volume buttons for HTML video opened in the TeleLink browser. Video and site support varies.
 - Use Android's Share action on text or a URL and select TeleLink Remote to send it to the TV.
 
+## Settings and quick manual
+
+Open the gear icon in TeleLink Remote or TeleLink TV to switch between light and dark appearance or open the in-app quick guide. Your appearance choice is saved on that device. The quick guide is available as a scrollable pop-up and summarizes setup, controls, sharing, pairing and troubleshooting.
+
 When TeleLink TV is in the background, Android may require a user action before another app or browser can open. If notifications are enabled, select **Open request** in the TeleLink receiver notification. If notifications are disabled, bring TeleLink TV to the foreground and send the request again.
 
 ## Enable TV remote access

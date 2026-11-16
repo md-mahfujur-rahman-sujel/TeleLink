@@ -25,9 +25,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.telelink.tv.network.TvCommandRouter
 import com.telelink.tv.security.PairedDevice
@@ -39,6 +42,8 @@ import com.telelink.tv.ui.TvBackdrop
 import com.telelink.tv.ui.DeveloperInfo
 import com.telelink.tv.ui.TvBrandHeader
 import com.telelink.tv.ui.TvContactScreen
+import com.telelink.tv.ui.TvSettingsDialog
+import com.telelink.tv.ui.TvUserManualDialog
 import com.telelink.tv.ui.TvButton
 import com.telelink.tv.ui.TvButtonStyle
 import com.telelink.tv.ui.TvDesignSpace
@@ -57,9 +62,20 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         setContent {
-            TeleLinkTVTheme {
+            var darkMode by rememberSaveable {
+                mutableStateOf(getSharedPreferences("telelink_settings", MODE_PRIVATE)
+                    .getBoolean("dark_mode", true))
+            }
+            TeleLinkTVTheme(darkTheme = darkMode) {
                 TvDesignSpace {
-                    TeleLinkHomeScreen()
+                    TeleLinkHomeScreen(
+                        darkMode = darkMode,
+                        onDarkModeChange = { enabled ->
+                            darkMode = enabled
+                            getSharedPreferences("telelink_settings", MODE_PRIVATE)
+                                .edit().putBoolean("dark_mode", enabled).apply()
+                        }
+                    )
                 }
             }
         }
@@ -110,7 +126,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun TeleLinkHomeScreen() {
+fun TeleLinkHomeScreen(darkMode: Boolean, onDarkModeChange: (Boolean) -> Unit) {
 
     val context = LocalContext.current
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
@@ -340,9 +356,13 @@ fun TeleLinkHomeScreen() {
 
     // "Contact developer" swaps the home screen for a page with the developer's details and QR codes.
     var showContact by remember { mutableStateOf(false) }
+    var showSettings by rememberSaveable { mutableStateOf(false) }
+    var showManual by rememberSaveable { mutableStateOf(false) }
     val contactQrs = remember {
         DeveloperInfo.links.map { link -> link to createQrMatrix(link.url) }
     }
+    BackHandler(enabled = showManual) { showManual = false }
+    BackHandler(enabled = showSettings) { showSettings = false }
     BackHandler(enabled = showContact) { showContact = false }
     LaunchedEffect(showContact) {
         if (!showContact) runCatching { primaryFocus.requestFocus() }
@@ -365,7 +385,17 @@ fun TeleLinkHomeScreen() {
                     .fillMaxHeight(),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                TvBrandHeader()
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    TvBrandHeader(modifier = Modifier.weight(1f))
+                    androidx.compose.material3.IconButton(onClick = { showSettings = true }) {
+                        Text(
+                            "⚙︎",
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.semantics { contentDescription = "Settings" }
+                        )
+                    }
+                }
                 ReceiverStatusCard(
                     status = receiverStatus,
                     running = receiverRunning,
@@ -446,6 +476,16 @@ fun TeleLinkHomeScreen() {
             }
         }
     }
+
+    if (showSettings) {
+        TvSettingsDialog(
+            darkMode = darkMode,
+            onDarkModeChange = onDarkModeChange,
+            onManual = { showSettings = false; showManual = true },
+            onDismiss = { showSettings = false }
+        )
+    }
+    if (showManual) TvUserManualDialog(onDismiss = { showManual = false })
 }
 
 fun getLocalIpAddress(context: Context): String {

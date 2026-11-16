@@ -43,8 +43,20 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         sharedText = readSharedText(intent)
         setContent {
-            TeleLinkRemoteTheme {
-                TeleLinkRemoteScreen(sharedText)
+            var darkMode by rememberSaveable {
+                mutableStateOf(getSharedPreferences("telelink_settings", MODE_PRIVATE)
+                    .getBoolean("dark_mode", true))
+            }
+            TeleLinkRemoteTheme(darkTheme = darkMode) {
+                TeleLinkRemoteScreen(
+                    sharedText = sharedText,
+                    darkMode = darkMode,
+                    onDarkModeChange = { enabled ->
+                        darkMode = enabled
+                        getSharedPreferences("telelink_settings", MODE_PRIVATE)
+                            .edit().putBoolean("dark_mode", enabled).apply()
+                    }
+                )
             }
         }
     }
@@ -67,7 +79,11 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun TeleLinkRemoteScreen(sharedText: String?) {
+private fun TeleLinkRemoteScreen(
+    sharedText: String?,
+    darkMode: Boolean,
+    onDarkModeChange: (Boolean) -> Unit
+) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
 
@@ -134,6 +150,8 @@ private fun TeleLinkRemoteScreen(sharedText: String?) {
     var useManualHost by remember { mutableStateOf(false) }
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     var mode by rememberSaveable { mutableIntStateOf(0) }
+    var showSettings by rememberSaveable { mutableStateOf(false) }
+    var showManual by rememberSaveable { mutableStateOf(false) }
     val discovery = remember { TvDiscovery(context) }
 
     val isPaired = conn.isPaired
@@ -475,7 +493,8 @@ private fun TeleLinkRemoteScreen(sharedText: String?) {
                 .padding(horizontal = 20.dp)
         ) {
             BrandHeader(
-                connected = if (mode == 1) btStatus.connectedName != null else isPaired
+                connected = if (mode == 1) btStatus.connectedName != null else isPaired,
+                onSettings = { showSettings = true }
             )
             Spacer(Modifier.height(12.dp))
             SegmentedTabs(
@@ -684,6 +703,16 @@ private fun TeleLinkRemoteScreen(sharedText: String?) {
             }
         }
     }
+
+    if (showSettings) {
+        RemoteSettingsDialog(
+            darkMode = darkMode,
+            onDarkModeChange = onDarkModeChange,
+            onManual = { showSettings = false; showManual = true },
+            onDismiss = { showSettings = false }
+        )
+    }
+    if (showManual) RemoteUserManualDialog(onDismiss = { showManual = false })
 }
 
 private fun findComponentActivity(context: Context): ComponentActivity? {
