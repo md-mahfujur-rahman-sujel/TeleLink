@@ -1,6 +1,6 @@
 # TeleLink
 
-![TeleLink logo](assets/svg/telelink-logo-light.svg)
+![TeleLink logo](assets/svg/telelink-logo-dark.svg)
 
 TeleLink is a local-network phone-to-TV remote system for Android TV. The phone sends controls and content; the TV opens apps, websites, or supported video itself, so TV-side playback is independent of the phone's lifecycle.
 
